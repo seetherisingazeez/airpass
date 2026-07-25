@@ -37,16 +37,21 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
 
 import 'config/airpass_config.dart';
 import 'database/airpass_database.dart';
 import 'di/service_locator.dart';
+import 'models/media_availability.dart';
+import 'models/media_type.dart';
 import 'models/node_role.dart';
 import 'services/airpass_background_service.dart';
 import 'services/airpass_sync_engine.dart';
 import 'services/endpoint_codec.dart';
+import 'services/media_storage_service.dart';
 import 'utils/airpass_logger.dart';
 
 /// Thrown when subscribing to a group would cause the encoded endpoint
@@ -82,6 +87,7 @@ class GroupSubscriptionLimitException implements Exception {
 class AirpassClient {
   final AirpassDatabase _db;
   final EndpointCodec _codec;
+  final MediaStorageService _mediaStorage;
   final String _localNodeId;
   final NodeRole _localRole;
 
@@ -89,11 +95,16 @@ class AirpassClient {
   static const _uuid = Uuid();
 
   AirpassClient({
-    required this._db,
-    required this._codec,
-    required this._localNodeId,
-    required this._localRole,
-  });
+    required AirpassDatabase db,
+    required EndpointCodec codec,
+    required MediaStorageService mediaStorage,
+    required String localNodeId,
+    required NodeRole localRole,
+  })  : _db = db,
+        _codec = codec,
+        _mediaStorage = mediaStorage,
+        _localNodeId = localNodeId,
+        _localRole = localRole;
 
   // ─────────────────────────────────────────────────────────────────────────
   // 1. SEND MESSAGE
@@ -354,4 +365,204 @@ class AirpassClient {
   void _log(String message) {
     AirpassLogger.log('AirpassClient', message);
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 7. SEND MEDIA MESSAGE
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Sends a media message (image, video, audio, or file).
+  ///
+  /// The file is:
+  /// 1. Validated (size check against [kMaxMediaFileSizeBytes]).
+  /// 2. Copied to internal Airpass storage.
+  /// 3. SHA-256 hashed for integrity verification.
+  /// 4. Thumbnailed for instant preview (images only in v1).
+  /// 5. Saved as a message with metadata + embedded thumbnail.
+  ///
+  /// The actual binary propagates via FILE payloads on-demand (Phase 3).
+  /// The metadata + thumbnail propagate through epidemic routing immediately.
+  ///
+  /// [filePath] — absolute path to the source file on the device.
+  /// [mediaType] — the type of media (image, video, audio, file).
+  /// [targetId] — the target (group ID, node UUID, or '*' for broadcast).
+  /// [caption] — optional text caption alongside the media.
+  ///
+  /// Throws [MediaFileTooLargeException] if the file exceeds the size limit.
+  /// Throws [FileSystemException] if the file doesn't exist.
+  ///
+  /// Returns the generated message ID.
+  Future<String> sendMediaMessage({
+    required String filePath,
+    required MediaType mediaType,
+    required String targetId,
+    String? caption,
+  }) async {
+    final file = File(filePath);
+
+    // 1. Validate file exists
+    if (!await file.exists()) {
+      throw FileSystemException('File not found', filePath);
+    }
+
+    // 2. Validate file size
+    final fileSize = await file.length();
+    if (fileSize > kMaxMediaFileSizeBytes) {
+      throw MediaFileTooLargeException(
+        fileSize: fileSize,
+        maxSize: kMaxMediaFileSizeBytes,
+        fileName: file.uri.pathSegments.last,
+      );
+    }
+
+    final messageId = _uuid.v4();
+    final fileName = file.uri.pathSegments.last;
+
+    // 3. Copy to internal storage
+    final localPath = await _mediaStorage.saveMediaFromPath(
+      messageId: messageId,
+      sourcePath: filePath,
+      fileName: fileName,
+    );
+
+    // 4. Compute SHA-256 hash
+    final hash = await _mediaStorage.computeHash(localPath);
+
+    // 5. Generate thumbnail (images only in v1)
+    Uint8List? thumbnail;
+    if (mediaType == MediaType.image) {
+      final imageBytes = await file.readAsBytes();
+      thumbnail = await _mediaStorage.generateThumbnail(imageBytes);
+    }
+
+    // 6. Determine MIME type from extension
+    final mimeType = _inferMimeType(fileName, mediaType);
+
+    // 7. Encode caption (or empty string) as the message payload
+    final payloadBytes = utf8.encode(caption ?? '');
+
+    // 8. Save to database
+    await _db.createMessage(
+      messageId: messageId,
+      senderId: _localNodeId,
+      targetId: targetId,
+      payload: payloadBytes,
+      ttl: kMediaDefaultMaxHops,
+      mediaType: mediaType,
+      mediaFileName: fileName,
+      mediaMimeType: mimeType,
+      mediaFileSize: fileSize,
+      mediaHash: hash,
+      mediaLocalPath: localPath,
+      mediaAvailability: MediaAvailability.available, // We have it locally
+      mediaThumbnail: thumbnail,
+    );
+
+    _log(
+      'Saved outgoing media message $messageId '
+      '(${mediaType.name}, $fileSize bytes) for target "$targetId"',
+    );
+
+    // Wake up the background service to broadcast metadata immediately
+    triggerImmediateSync();
+
+    return messageId;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 8. GET MEDIA PATH
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Returns the local file path for a media message, or null
+  /// if the binary hasn't been downloaded yet.
+  ///
+  /// Use this to display images/videos in the UI:
+  /// ```dart
+  /// final path = await client.getMediaPath(msg.messageId);
+  /// if (path != null) {
+  ///   // Display the image/video
+  ///   Image.file(File(path));
+  /// } else {
+  ///   // Show thumbnail + download button
+  /// }
+  /// ```
+  Future<String?> getMediaPath(String messageId) async {
+    return _mediaStorage.getMediaPath(messageId);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 9. REQUEST MEDIA DOWNLOAD
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Manually requests download of a media file.
+  ///
+  /// Sets the media availability to [MediaAvailability.pendingDownload]
+  /// so that the next sync with a peer that has the file will fetch it
+  /// during Phase 3.
+  ///
+  /// Use this for files that are too large for auto-download
+  /// (over [kAutoDownloadMaxBytes]).
+  Future<void> requestMediaDownload(String messageId) async {
+    await _db.updateMediaAvailability(
+      messageId,
+      MediaAvailability.pendingDownload,
+    );
+    _log('Queued manual media download for message $messageId');
+
+    // Trigger a sync to try to fetch the file immediately
+    triggerImmediateSync();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MEDIA HELPERS
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Infers the MIME type from a filename and media type.
+  String _inferMimeType(String fileName, MediaType type) {
+    final ext = fileName.split('.').last.toLowerCase();
+    return switch (type) {
+      MediaType.image => switch (ext) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'heic' => 'image/heic',
+        _ => 'image/jpeg',
+      },
+      MediaType.video => switch (ext) {
+        'mp4' => 'video/mp4',
+        'webm' => 'video/webm',
+        'mov' => 'video/quicktime',
+        'avi' => 'video/x-msvideo',
+        _ => 'video/mp4',
+      },
+      MediaType.audio => switch (ext) {
+        'mp3' => 'audio/mpeg',
+        'ogg' => 'audio/ogg',
+        'wav' => 'audio/wav',
+        'aac' => 'audio/aac',
+        'm4a' => 'audio/mp4',
+        _ => 'audio/mpeg',
+      },
+      MediaType.file => 'application/octet-stream',
+      MediaType.text => 'text/plain',
+    };
+  }
+}
+
+/// Thrown when a media file exceeds the maximum allowed size.
+class MediaFileTooLargeException implements Exception {
+  final int fileSize;
+  final int maxSize;
+  final String fileName;
+
+  const MediaFileTooLargeException({
+    required this.fileSize,
+    required this.maxSize,
+    required this.fileName,
+  });
+
+  @override
+  String toString() =>
+      'MediaFileTooLargeException: "$fileName" is ${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB, '
+      'but the maximum allowed size is ${(maxSize / 1024 / 1024).toStringAsFixed(0)} MB.';
 }

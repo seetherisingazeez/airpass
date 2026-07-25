@@ -15,6 +15,8 @@ export 'package:permission_handler/permission_handler.dart';
 export 'config/airpass_config.dart';
 
 // ─── Models ───
+export 'models/media_availability.dart';
+export 'models/media_type.dart';
 export 'models/message_status.dart';
 export 'models/node_role.dart';
 
@@ -26,6 +28,7 @@ export 'services/airpass_background_service.dart';
 export 'services/airpass_sync_engine.dart';
 export 'services/bloom_filter.dart';
 export 'services/endpoint_codec.dart';
+export 'services/media_storage_service.dart';
 export 'services/message_signer.dart';
 export 'services/nearby_connection_manager.dart';
 
@@ -37,3 +40,4 @@ export 'di/service_locator.dart';
 
 // ─── Utils ───
 export 'utils/airpass_logger.dart';
+

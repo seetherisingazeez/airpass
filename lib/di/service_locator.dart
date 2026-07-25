@@ -26,6 +26,7 @@ import '../database/airpass_database.dart';
 import '../models/node_role.dart';
 import '../services/airpass_sync_engine.dart';
 import '../services/endpoint_codec.dart';
+import '../services/media_storage_service.dart';
 import '../services/nearby_connection_manager.dart';
 
 /// Global GetIt instance for the Airpass protocol.
@@ -92,12 +93,18 @@ Future<void> setupAirpassServiceLocator() async {
     ),
   );
 
+  // ─── Register media storage service ───
+  getIt.registerLazySingleton<MediaStorageService>(
+    () => MediaStorageService(database: db),
+  );
+
   // ─── Register connection manager ───
   getIt.registerLazySingleton<NearbyConnectionManager>(
     () => NearbyConnectionManager(
       syncEngine: getIt<AirpassSyncEngine>(),
       codec: getIt<EndpointCodec>(),
       db: db,
+      mediaStorage: getIt<MediaStorageService>(),
       localNodeId: nodeId,
       localRole: role,
       localGroupIds: groupIds,
@@ -109,6 +116,7 @@ Future<void> setupAirpassServiceLocator() async {
     () => AirpassClient(
       db: db,
       codec: getIt<EndpointCodec>(),
+      mediaStorage: getIt<MediaStorageService>(),
       localNodeId: nodeId,
       localRole: role,
     ),

@@ -13,6 +13,8 @@ library;
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 
+import '../models/media_availability.dart';
+import '../models/media_type.dart';
 import '../models/message_status.dart';
 import '../models/node_role.dart';
 
@@ -90,6 +92,45 @@ class Messages extends Table {
   /// Relaying nodes can verify the signature to detect tampering.
   TextColumn get signature => text().nullable()();
 
+  // ─── Media Metadata ───
+  // These fields support the metadata-first, file-on-demand architecture.
+  // Only the metadata + thumbnail travel through epidemic routing.
+  // The actual binary is transferred via Nearby's FILE payload API.
+
+  /// The type of media attached (0 = text, 1 = image, 2 = video, etc.).
+  /// See [MediaType]. Defaults to 0 (text — no media).
+  IntColumn get mediaType => integer().withDefault(const Constant(0))();
+
+  /// Original filename of the attached media (e.g., 'photo_001.jpg').
+  /// Null for text-only messages.
+  TextColumn get mediaFileName => text().nullable()();
+
+  /// MIME type of the media (e.g., 'image/jpeg', 'video/mp4').
+  /// Null for text-only messages.
+  TextColumn get mediaMimeType => text().nullable()();
+
+  /// Size of the full media file in bytes.
+  /// Used by the UI to display file size and decide auto-download.
+  IntColumn get mediaFileSize => integer().nullable()();
+
+  /// SHA-256 hash of the full media file for integrity verification.
+  /// Computed on send, verified on receive after FILE transfer.
+  TextColumn get mediaHash => text().nullable()();
+
+  /// Local filesystem path to the downloaded media binary.
+  /// Null until the binary is successfully transferred.
+  TextColumn get mediaLocalPath => text().nullable()();
+
+  /// Availability state of the media binary on this device.
+  /// See [MediaAvailability]. Defaults to 0 (notApplicable — text message).
+  IntColumn get mediaAvailability =>
+      integer().withDefault(const Constant(0))();
+
+  /// Compressed thumbnail bytes (JPEG, ≤5 KB) for instant preview.
+  /// Embedded directly in the epidemic sync payload so users see
+  /// a preview even before the full file is transferred.
+  BlobColumn get mediaThumbnail => blob().nullable()();
+
   @override
   Set<Column> get primaryKey => {messageId};
 }
@@ -164,7 +205,7 @@ class AirpassDatabase extends _$AirpassDatabase {
 
   /// Bump this when you change the schema. See [migration] below.
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -186,6 +227,17 @@ class AirpassDatabase extends _$AirpassDatabase {
             // v4 → v5: Add batteryLevel and hasInternetAccess to Nodes table.
             await m.addColumn(nodes, nodes.batteryLevel);
             await m.addColumn(nodes, nodes.hasInternetAccess);
+          }
+          if (from < 6) {
+            // v5 → v6: Add multimedia metadata columns to Messages table.
+            await m.addColumn(messages, messages.mediaType);
+            await m.addColumn(messages, messages.mediaFileName);
+            await m.addColumn(messages, messages.mediaMimeType);
+            await m.addColumn(messages, messages.mediaFileSize);
+            await m.addColumn(messages, messages.mediaHash);
+            await m.addColumn(messages, messages.mediaLocalPath);
+            await m.addColumn(messages, messages.mediaAvailability);
+            await m.addColumn(messages, messages.mediaThumbnail);
           }
         },
       );
@@ -440,6 +492,15 @@ class AirpassDatabase extends _$AirpassDatabase {
     required List<int> payload,
     required int ttl,
     String? signature,
+    // Media fields (all optional — text messages omit these)
+    MediaType mediaType = MediaType.text,
+    String? mediaFileName,
+    String? mediaMimeType,
+    int? mediaFileSize,
+    String? mediaHash,
+    String? mediaLocalPath,
+    MediaAvailability mediaAvailability = MediaAvailability.notApplicable,
+    Uint8List? mediaThumbnail,
   }) {
     return into(messages).insert(MessagesCompanion.insert(
       messageId: messageId,
@@ -449,7 +510,73 @@ class AirpassDatabase extends _$AirpassDatabase {
       createdAt: DateTime.now().millisecondsSinceEpoch,
       ttl: ttl,
       signature: Value(signature),
+      mediaType: Value(mediaType.value),
+      mediaFileName: Value(mediaFileName),
+      mediaMimeType: Value(mediaMimeType),
+      mediaFileSize: Value(mediaFileSize),
+      mediaHash: Value(mediaHash),
+      mediaLocalPath: Value(mediaLocalPath),
+      mediaAvailability: Value(mediaAvailability.value),
+      mediaThumbnail: Value(mediaThumbnail),
     ));
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MEDIA OPERATIONS
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /// Returns messages with media that are pending download.
+  ///
+  /// Used by the sync engine to decide which media files to request
+  /// from peers during Phase 3.
+  Future<List<Message>> getMessagesWithPendingMedia() {
+    return (select(messages)
+          ..where((t) => t.mediaAvailability.equals(
+              MediaAvailability.pendingDownload.value)))
+        .get();
+  }
+
+  /// Returns pending media messages that qualify for auto-download
+  /// (file size under [maxAutoDownloadBytes]).
+  Future<List<Message>> getAutoDownloadableMedia(int maxAutoDownloadBytes) {
+    return (select(messages)
+          ..where((t) =>
+              t.mediaAvailability.equals(
+                  MediaAvailability.pendingDownload.value) &
+              t.mediaFileSize.isSmallerOrEqualValue(maxAutoDownloadBytes)))
+        .get();
+  }
+
+  /// Updates the media availability and local path for a message.
+  ///
+  /// Called after a FILE payload transfer completes (or fails).
+  Future<void> updateMediaAvailability(
+    String messageId,
+    MediaAvailability availability, {
+    String? localPath,
+  }) {
+    return (update(messages)..where((t) => t.messageId.equals(messageId)))
+        .write(MessagesCompanion(
+      mediaAvailability: Value(availability.value),
+      mediaLocalPath: Value(localPath),
+    ));
+  }
+
+  /// Watches a specific message by ID — used for media download progress.
+  Stream<Message?> watchMessage(String messageId) {
+    return (select(messages)
+          ..where((t) => t.messageId.equals(messageId)))
+        .watchSingleOrNull();
+  }
+
+  /// Returns all messages that have media files stored locally.
+  /// Used by [MediaStorageService.pruneOrphanedMedia] to find
+  /// which files are still referenced.
+  Future<List<Message>> getMessagesWithLocalMedia() {
+    return (select(messages)
+          ..where((t) => t.mediaAvailability.equals(
+              MediaAvailability.available.value)))
+        .get();
   }
 
   // ───────────────────────────────────────────────────────────────────────────

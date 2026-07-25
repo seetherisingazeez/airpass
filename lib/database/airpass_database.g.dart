@@ -689,6 +689,97 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _mediaTypeMeta = const VerificationMeta(
+    'mediaType',
+  );
+  @override
+  late final GeneratedColumn<int> mediaType = GeneratedColumn<int>(
+    'media_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _mediaFileNameMeta = const VerificationMeta(
+    'mediaFileName',
+  );
+  @override
+  late final GeneratedColumn<String> mediaFileName = GeneratedColumn<String>(
+    'media_file_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mediaMimeTypeMeta = const VerificationMeta(
+    'mediaMimeType',
+  );
+  @override
+  late final GeneratedColumn<String> mediaMimeType = GeneratedColumn<String>(
+    'media_mime_type',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mediaFileSizeMeta = const VerificationMeta(
+    'mediaFileSize',
+  );
+  @override
+  late final GeneratedColumn<int> mediaFileSize = GeneratedColumn<int>(
+    'media_file_size',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mediaHashMeta = const VerificationMeta(
+    'mediaHash',
+  );
+  @override
+  late final GeneratedColumn<String> mediaHash = GeneratedColumn<String>(
+    'media_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mediaLocalPathMeta = const VerificationMeta(
+    'mediaLocalPath',
+  );
+  @override
+  late final GeneratedColumn<String> mediaLocalPath = GeneratedColumn<String>(
+    'media_local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mediaAvailabilityMeta = const VerificationMeta(
+    'mediaAvailability',
+  );
+  @override
+  late final GeneratedColumn<int> mediaAvailability = GeneratedColumn<int>(
+    'media_availability',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _mediaThumbnailMeta = const VerificationMeta(
+    'mediaThumbnail',
+  );
+  @override
+  late final GeneratedColumn<Uint8List> mediaThumbnail =
+      GeneratedColumn<Uint8List>(
+        'media_thumbnail',
+        aliasedName,
+        true,
+        type: DriftSqlType.blob,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     messageId,
@@ -699,6 +790,14 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     createdAt,
     ttl,
     signature,
+    mediaType,
+    mediaFileName,
+    mediaMimeType,
+    mediaFileSize,
+    mediaHash,
+    mediaLocalPath,
+    mediaAvailability,
+    mediaThumbnail,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -772,6 +871,72 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         signature.isAcceptableOrUnknown(data['signature']!, _signatureMeta),
       );
     }
+    if (data.containsKey('media_type')) {
+      context.handle(
+        _mediaTypeMeta,
+        mediaType.isAcceptableOrUnknown(data['media_type']!, _mediaTypeMeta),
+      );
+    }
+    if (data.containsKey('media_file_name')) {
+      context.handle(
+        _mediaFileNameMeta,
+        mediaFileName.isAcceptableOrUnknown(
+          data['media_file_name']!,
+          _mediaFileNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('media_mime_type')) {
+      context.handle(
+        _mediaMimeTypeMeta,
+        mediaMimeType.isAcceptableOrUnknown(
+          data['media_mime_type']!,
+          _mediaMimeTypeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('media_file_size')) {
+      context.handle(
+        _mediaFileSizeMeta,
+        mediaFileSize.isAcceptableOrUnknown(
+          data['media_file_size']!,
+          _mediaFileSizeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('media_hash')) {
+      context.handle(
+        _mediaHashMeta,
+        mediaHash.isAcceptableOrUnknown(data['media_hash']!, _mediaHashMeta),
+      );
+    }
+    if (data.containsKey('media_local_path')) {
+      context.handle(
+        _mediaLocalPathMeta,
+        mediaLocalPath.isAcceptableOrUnknown(
+          data['media_local_path']!,
+          _mediaLocalPathMeta,
+        ),
+      );
+    }
+    if (data.containsKey('media_availability')) {
+      context.handle(
+        _mediaAvailabilityMeta,
+        mediaAvailability.isAcceptableOrUnknown(
+          data['media_availability']!,
+          _mediaAvailabilityMeta,
+        ),
+      );
+    }
+    if (data.containsKey('media_thumbnail')) {
+      context.handle(
+        _mediaThumbnailMeta,
+        mediaThumbnail.isAcceptableOrUnknown(
+          data['media_thumbnail']!,
+          _mediaThumbnailMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -813,6 +978,38 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}signature'],
       ),
+      mediaType: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}media_type'],
+      )!,
+      mediaFileName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_file_name'],
+      ),
+      mediaMimeType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_mime_type'],
+      ),
+      mediaFileSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}media_file_size'],
+      ),
+      mediaHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_hash'],
+      ),
+      mediaLocalPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_local_path'],
+      ),
+      mediaAvailability: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}media_availability'],
+      )!,
+      mediaThumbnail: attachedDatabase.typeMapping.read(
+        DriftSqlType.blob,
+        data['${effectivePrefix}media_thumbnail'],
+      ),
     );
   }
 
@@ -849,6 +1046,39 @@ class Message extends DataClass implements Insertable<Message> {
   /// Computed by [MessageSigner] when the message is created locally.
   /// Relaying nodes can verify the signature to detect tampering.
   final String? signature;
+
+  /// The type of media attached (0 = text, 1 = image, 2 = video, etc.).
+  /// See [MediaType]. Defaults to 0 (text — no media).
+  final int mediaType;
+
+  /// Original filename of the attached media (e.g., 'photo_001.jpg').
+  /// Null for text-only messages.
+  final String? mediaFileName;
+
+  /// MIME type of the media (e.g., 'image/jpeg', 'video/mp4').
+  /// Null for text-only messages.
+  final String? mediaMimeType;
+
+  /// Size of the full media file in bytes.
+  /// Used by the UI to display file size and decide auto-download.
+  final int? mediaFileSize;
+
+  /// SHA-256 hash of the full media file for integrity verification.
+  /// Computed on send, verified on receive after FILE transfer.
+  final String? mediaHash;
+
+  /// Local filesystem path to the downloaded media binary.
+  /// Null until the binary is successfully transferred.
+  final String? mediaLocalPath;
+
+  /// Availability state of the media binary on this device.
+  /// See [MediaAvailability]. Defaults to 0 (notApplicable — text message).
+  final int mediaAvailability;
+
+  /// Compressed thumbnail bytes (JPEG, ≤5 KB) for instant preview.
+  /// Embedded directly in the epidemic sync payload so users see
+  /// a preview even before the full file is transferred.
+  final Uint8List? mediaThumbnail;
   const Message({
     required this.messageId,
     required this.senderId,
@@ -858,6 +1088,14 @@ class Message extends DataClass implements Insertable<Message> {
     required this.createdAt,
     required this.ttl,
     this.signature,
+    required this.mediaType,
+    this.mediaFileName,
+    this.mediaMimeType,
+    this.mediaFileSize,
+    this.mediaHash,
+    this.mediaLocalPath,
+    required this.mediaAvailability,
+    this.mediaThumbnail,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -871,6 +1109,26 @@ class Message extends DataClass implements Insertable<Message> {
     map['ttl'] = Variable<int>(ttl);
     if (!nullToAbsent || signature != null) {
       map['signature'] = Variable<String>(signature);
+    }
+    map['media_type'] = Variable<int>(mediaType);
+    if (!nullToAbsent || mediaFileName != null) {
+      map['media_file_name'] = Variable<String>(mediaFileName);
+    }
+    if (!nullToAbsent || mediaMimeType != null) {
+      map['media_mime_type'] = Variable<String>(mediaMimeType);
+    }
+    if (!nullToAbsent || mediaFileSize != null) {
+      map['media_file_size'] = Variable<int>(mediaFileSize);
+    }
+    if (!nullToAbsent || mediaHash != null) {
+      map['media_hash'] = Variable<String>(mediaHash);
+    }
+    if (!nullToAbsent || mediaLocalPath != null) {
+      map['media_local_path'] = Variable<String>(mediaLocalPath);
+    }
+    map['media_availability'] = Variable<int>(mediaAvailability);
+    if (!nullToAbsent || mediaThumbnail != null) {
+      map['media_thumbnail'] = Variable<Uint8List>(mediaThumbnail);
     }
     return map;
   }
@@ -887,6 +1145,26 @@ class Message extends DataClass implements Insertable<Message> {
       signature: signature == null && nullToAbsent
           ? const Value.absent()
           : Value(signature),
+      mediaType: Value(mediaType),
+      mediaFileName: mediaFileName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaFileName),
+      mediaMimeType: mediaMimeType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaMimeType),
+      mediaFileSize: mediaFileSize == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaFileSize),
+      mediaHash: mediaHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaHash),
+      mediaLocalPath: mediaLocalPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaLocalPath),
+      mediaAvailability: Value(mediaAvailability),
+      mediaThumbnail: mediaThumbnail == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mediaThumbnail),
     );
   }
 
@@ -904,6 +1182,14 @@ class Message extends DataClass implements Insertable<Message> {
       createdAt: serializer.fromJson<int>(json['createdAt']),
       ttl: serializer.fromJson<int>(json['ttl']),
       signature: serializer.fromJson<String?>(json['signature']),
+      mediaType: serializer.fromJson<int>(json['mediaType']),
+      mediaFileName: serializer.fromJson<String?>(json['mediaFileName']),
+      mediaMimeType: serializer.fromJson<String?>(json['mediaMimeType']),
+      mediaFileSize: serializer.fromJson<int?>(json['mediaFileSize']),
+      mediaHash: serializer.fromJson<String?>(json['mediaHash']),
+      mediaLocalPath: serializer.fromJson<String?>(json['mediaLocalPath']),
+      mediaAvailability: serializer.fromJson<int>(json['mediaAvailability']),
+      mediaThumbnail: serializer.fromJson<Uint8List?>(json['mediaThumbnail']),
     );
   }
   @override
@@ -918,6 +1204,14 @@ class Message extends DataClass implements Insertable<Message> {
       'createdAt': serializer.toJson<int>(createdAt),
       'ttl': serializer.toJson<int>(ttl),
       'signature': serializer.toJson<String?>(signature),
+      'mediaType': serializer.toJson<int>(mediaType),
+      'mediaFileName': serializer.toJson<String?>(mediaFileName),
+      'mediaMimeType': serializer.toJson<String?>(mediaMimeType),
+      'mediaFileSize': serializer.toJson<int?>(mediaFileSize),
+      'mediaHash': serializer.toJson<String?>(mediaHash),
+      'mediaLocalPath': serializer.toJson<String?>(mediaLocalPath),
+      'mediaAvailability': serializer.toJson<int>(mediaAvailability),
+      'mediaThumbnail': serializer.toJson<Uint8List?>(mediaThumbnail),
     };
   }
 
@@ -930,6 +1224,14 @@ class Message extends DataClass implements Insertable<Message> {
     int? createdAt,
     int? ttl,
     Value<String?> signature = const Value.absent(),
+    int? mediaType,
+    Value<String?> mediaFileName = const Value.absent(),
+    Value<String?> mediaMimeType = const Value.absent(),
+    Value<int?> mediaFileSize = const Value.absent(),
+    Value<String?> mediaHash = const Value.absent(),
+    Value<String?> mediaLocalPath = const Value.absent(),
+    int? mediaAvailability,
+    Value<Uint8List?> mediaThumbnail = const Value.absent(),
   }) => Message(
     messageId: messageId ?? this.messageId,
     senderId: senderId ?? this.senderId,
@@ -939,6 +1241,24 @@ class Message extends DataClass implements Insertable<Message> {
     createdAt: createdAt ?? this.createdAt,
     ttl: ttl ?? this.ttl,
     signature: signature.present ? signature.value : this.signature,
+    mediaType: mediaType ?? this.mediaType,
+    mediaFileName: mediaFileName.present
+        ? mediaFileName.value
+        : this.mediaFileName,
+    mediaMimeType: mediaMimeType.present
+        ? mediaMimeType.value
+        : this.mediaMimeType,
+    mediaFileSize: mediaFileSize.present
+        ? mediaFileSize.value
+        : this.mediaFileSize,
+    mediaHash: mediaHash.present ? mediaHash.value : this.mediaHash,
+    mediaLocalPath: mediaLocalPath.present
+        ? mediaLocalPath.value
+        : this.mediaLocalPath,
+    mediaAvailability: mediaAvailability ?? this.mediaAvailability,
+    mediaThumbnail: mediaThumbnail.present
+        ? mediaThumbnail.value
+        : this.mediaThumbnail,
   );
   Message copyWithCompanion(MessagesCompanion data) {
     return Message(
@@ -950,6 +1270,26 @@ class Message extends DataClass implements Insertable<Message> {
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       ttl: data.ttl.present ? data.ttl.value : this.ttl,
       signature: data.signature.present ? data.signature.value : this.signature,
+      mediaType: data.mediaType.present ? data.mediaType.value : this.mediaType,
+      mediaFileName: data.mediaFileName.present
+          ? data.mediaFileName.value
+          : this.mediaFileName,
+      mediaMimeType: data.mediaMimeType.present
+          ? data.mediaMimeType.value
+          : this.mediaMimeType,
+      mediaFileSize: data.mediaFileSize.present
+          ? data.mediaFileSize.value
+          : this.mediaFileSize,
+      mediaHash: data.mediaHash.present ? data.mediaHash.value : this.mediaHash,
+      mediaLocalPath: data.mediaLocalPath.present
+          ? data.mediaLocalPath.value
+          : this.mediaLocalPath,
+      mediaAvailability: data.mediaAvailability.present
+          ? data.mediaAvailability.value
+          : this.mediaAvailability,
+      mediaThumbnail: data.mediaThumbnail.present
+          ? data.mediaThumbnail.value
+          : this.mediaThumbnail,
     );
   }
 
@@ -963,7 +1303,15 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
           ..write('ttl: $ttl, ')
-          ..write('signature: $signature')
+          ..write('signature: $signature, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('mediaFileName: $mediaFileName, ')
+          ..write('mediaMimeType: $mediaMimeType, ')
+          ..write('mediaFileSize: $mediaFileSize, ')
+          ..write('mediaHash: $mediaHash, ')
+          ..write('mediaLocalPath: $mediaLocalPath, ')
+          ..write('mediaAvailability: $mediaAvailability, ')
+          ..write('mediaThumbnail: $mediaThumbnail')
           ..write(')'))
         .toString();
   }
@@ -978,6 +1326,14 @@ class Message extends DataClass implements Insertable<Message> {
     createdAt,
     ttl,
     signature,
+    mediaType,
+    mediaFileName,
+    mediaMimeType,
+    mediaFileSize,
+    mediaHash,
+    mediaLocalPath,
+    mediaAvailability,
+    $driftBlobEquality.hash(mediaThumbnail),
   );
   @override
   bool operator ==(Object other) =>
@@ -990,7 +1346,15 @@ class Message extends DataClass implements Insertable<Message> {
           other.status == this.status &&
           other.createdAt == this.createdAt &&
           other.ttl == this.ttl &&
-          other.signature == this.signature);
+          other.signature == this.signature &&
+          other.mediaType == this.mediaType &&
+          other.mediaFileName == this.mediaFileName &&
+          other.mediaMimeType == this.mediaMimeType &&
+          other.mediaFileSize == this.mediaFileSize &&
+          other.mediaHash == this.mediaHash &&
+          other.mediaLocalPath == this.mediaLocalPath &&
+          other.mediaAvailability == this.mediaAvailability &&
+          $driftBlobEquality.equals(other.mediaThumbnail, this.mediaThumbnail));
 }
 
 class MessagesCompanion extends UpdateCompanion<Message> {
@@ -1002,6 +1366,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<int> createdAt;
   final Value<int> ttl;
   final Value<String?> signature;
+  final Value<int> mediaType;
+  final Value<String?> mediaFileName;
+  final Value<String?> mediaMimeType;
+  final Value<int?> mediaFileSize;
+  final Value<String?> mediaHash;
+  final Value<String?> mediaLocalPath;
+  final Value<int> mediaAvailability;
+  final Value<Uint8List?> mediaThumbnail;
   final Value<int> rowid;
   const MessagesCompanion({
     this.messageId = const Value.absent(),
@@ -1012,6 +1384,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.createdAt = const Value.absent(),
     this.ttl = const Value.absent(),
     this.signature = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.mediaFileName = const Value.absent(),
+    this.mediaMimeType = const Value.absent(),
+    this.mediaFileSize = const Value.absent(),
+    this.mediaHash = const Value.absent(),
+    this.mediaLocalPath = const Value.absent(),
+    this.mediaAvailability = const Value.absent(),
+    this.mediaThumbnail = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
@@ -1023,6 +1403,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     required int createdAt,
     required int ttl,
     this.signature = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.mediaFileName = const Value.absent(),
+    this.mediaMimeType = const Value.absent(),
+    this.mediaFileSize = const Value.absent(),
+    this.mediaHash = const Value.absent(),
+    this.mediaLocalPath = const Value.absent(),
+    this.mediaAvailability = const Value.absent(),
+    this.mediaThumbnail = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : messageId = Value(messageId),
        senderId = Value(senderId),
@@ -1039,6 +1427,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<int>? createdAt,
     Expression<int>? ttl,
     Expression<String>? signature,
+    Expression<int>? mediaType,
+    Expression<String>? mediaFileName,
+    Expression<String>? mediaMimeType,
+    Expression<int>? mediaFileSize,
+    Expression<String>? mediaHash,
+    Expression<String>? mediaLocalPath,
+    Expression<int>? mediaAvailability,
+    Expression<Uint8List>? mediaThumbnail,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1050,6 +1446,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (createdAt != null) 'created_at': createdAt,
       if (ttl != null) 'ttl': ttl,
       if (signature != null) 'signature': signature,
+      if (mediaType != null) 'media_type': mediaType,
+      if (mediaFileName != null) 'media_file_name': mediaFileName,
+      if (mediaMimeType != null) 'media_mime_type': mediaMimeType,
+      if (mediaFileSize != null) 'media_file_size': mediaFileSize,
+      if (mediaHash != null) 'media_hash': mediaHash,
+      if (mediaLocalPath != null) 'media_local_path': mediaLocalPath,
+      if (mediaAvailability != null) 'media_availability': mediaAvailability,
+      if (mediaThumbnail != null) 'media_thumbnail': mediaThumbnail,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1063,6 +1467,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<int>? createdAt,
     Value<int>? ttl,
     Value<String?>? signature,
+    Value<int>? mediaType,
+    Value<String?>? mediaFileName,
+    Value<String?>? mediaMimeType,
+    Value<int?>? mediaFileSize,
+    Value<String?>? mediaHash,
+    Value<String?>? mediaLocalPath,
+    Value<int>? mediaAvailability,
+    Value<Uint8List?>? mediaThumbnail,
     Value<int>? rowid,
   }) {
     return MessagesCompanion(
@@ -1074,6 +1486,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       createdAt: createdAt ?? this.createdAt,
       ttl: ttl ?? this.ttl,
       signature: signature ?? this.signature,
+      mediaType: mediaType ?? this.mediaType,
+      mediaFileName: mediaFileName ?? this.mediaFileName,
+      mediaMimeType: mediaMimeType ?? this.mediaMimeType,
+      mediaFileSize: mediaFileSize ?? this.mediaFileSize,
+      mediaHash: mediaHash ?? this.mediaHash,
+      mediaLocalPath: mediaLocalPath ?? this.mediaLocalPath,
+      mediaAvailability: mediaAvailability ?? this.mediaAvailability,
+      mediaThumbnail: mediaThumbnail ?? this.mediaThumbnail,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1105,6 +1525,30 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (signature.present) {
       map['signature'] = Variable<String>(signature.value);
     }
+    if (mediaType.present) {
+      map['media_type'] = Variable<int>(mediaType.value);
+    }
+    if (mediaFileName.present) {
+      map['media_file_name'] = Variable<String>(mediaFileName.value);
+    }
+    if (mediaMimeType.present) {
+      map['media_mime_type'] = Variable<String>(mediaMimeType.value);
+    }
+    if (mediaFileSize.present) {
+      map['media_file_size'] = Variable<int>(mediaFileSize.value);
+    }
+    if (mediaHash.present) {
+      map['media_hash'] = Variable<String>(mediaHash.value);
+    }
+    if (mediaLocalPath.present) {
+      map['media_local_path'] = Variable<String>(mediaLocalPath.value);
+    }
+    if (mediaAvailability.present) {
+      map['media_availability'] = Variable<int>(mediaAvailability.value);
+    }
+    if (mediaThumbnail.present) {
+      map['media_thumbnail'] = Variable<Uint8List>(mediaThumbnail.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1122,6 +1566,14 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('createdAt: $createdAt, ')
           ..write('ttl: $ttl, ')
           ..write('signature: $signature, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('mediaFileName: $mediaFileName, ')
+          ..write('mediaMimeType: $mediaMimeType, ')
+          ..write('mediaFileSize: $mediaFileSize, ')
+          ..write('mediaHash: $mediaHash, ')
+          ..write('mediaLocalPath: $mediaLocalPath, ')
+          ..write('mediaAvailability: $mediaAvailability, ')
+          ..write('mediaThumbnail: $mediaThumbnail, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2229,6 +2681,14 @@ typedef $$MessagesTableCreateCompanionBuilder =
       required int createdAt,
       required int ttl,
       Value<String?> signature,
+      Value<int> mediaType,
+      Value<String?> mediaFileName,
+      Value<String?> mediaMimeType,
+      Value<int?> mediaFileSize,
+      Value<String?> mediaHash,
+      Value<String?> mediaLocalPath,
+      Value<int> mediaAvailability,
+      Value<Uint8List?> mediaThumbnail,
       Value<int> rowid,
     });
 typedef $$MessagesTableUpdateCompanionBuilder =
@@ -2241,6 +2701,14 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<int> createdAt,
       Value<int> ttl,
       Value<String?> signature,
+      Value<int> mediaType,
+      Value<String?> mediaFileName,
+      Value<String?> mediaMimeType,
+      Value<int?> mediaFileSize,
+      Value<String?> mediaHash,
+      Value<String?> mediaLocalPath,
+      Value<int> mediaAvailability,
+      Value<Uint8List?> mediaThumbnail,
       Value<int> rowid,
     });
 
@@ -2290,6 +2758,46 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<String> get signature => $composableBuilder(
     column: $table.signature,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get mediaType => $composableBuilder(
+    column: $table.mediaType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaFileName => $composableBuilder(
+    column: $table.mediaFileName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaMimeType => $composableBuilder(
+    column: $table.mediaMimeType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get mediaFileSize => $composableBuilder(
+    column: $table.mediaFileSize,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaHash => $composableBuilder(
+    column: $table.mediaHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaLocalPath => $composableBuilder(
+    column: $table.mediaLocalPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get mediaAvailability => $composableBuilder(
+    column: $table.mediaAvailability,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<Uint8List> get mediaThumbnail => $composableBuilder(
+    column: $table.mediaThumbnail,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2342,6 +2850,46 @@ class $$MessagesTableOrderingComposer
     column: $table.signature,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get mediaType => $composableBuilder(
+    column: $table.mediaType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mediaFileName => $composableBuilder(
+    column: $table.mediaFileName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mediaMimeType => $composableBuilder(
+    column: $table.mediaMimeType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get mediaFileSize => $composableBuilder(
+    column: $table.mediaFileSize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mediaHash => $composableBuilder(
+    column: $table.mediaHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mediaLocalPath => $composableBuilder(
+    column: $table.mediaLocalPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get mediaAvailability => $composableBuilder(
+    column: $table.mediaAvailability,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get mediaThumbnail => $composableBuilder(
+    column: $table.mediaThumbnail,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MessagesTableAnnotationComposer
@@ -2376,6 +2924,42 @@ class $$MessagesTableAnnotationComposer
 
   GeneratedColumn<String> get signature =>
       $composableBuilder(column: $table.signature, builder: (column) => column);
+
+  GeneratedColumn<int> get mediaType =>
+      $composableBuilder(column: $table.mediaType, builder: (column) => column);
+
+  GeneratedColumn<String> get mediaFileName => $composableBuilder(
+    column: $table.mediaFileName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get mediaMimeType => $composableBuilder(
+    column: $table.mediaMimeType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get mediaFileSize => $composableBuilder(
+    column: $table.mediaFileSize,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get mediaHash =>
+      $composableBuilder(column: $table.mediaHash, builder: (column) => column);
+
+  GeneratedColumn<String> get mediaLocalPath => $composableBuilder(
+    column: $table.mediaLocalPath,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get mediaAvailability => $composableBuilder(
+    column: $table.mediaAvailability,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<Uint8List> get mediaThumbnail => $composableBuilder(
+    column: $table.mediaThumbnail,
+    builder: (column) => column,
+  );
 }
 
 class $$MessagesTableTableManager
@@ -2414,6 +2998,14 @@ class $$MessagesTableTableManager
                 Value<int> createdAt = const Value.absent(),
                 Value<int> ttl = const Value.absent(),
                 Value<String?> signature = const Value.absent(),
+                Value<int> mediaType = const Value.absent(),
+                Value<String?> mediaFileName = const Value.absent(),
+                Value<String?> mediaMimeType = const Value.absent(),
+                Value<int?> mediaFileSize = const Value.absent(),
+                Value<String?> mediaHash = const Value.absent(),
+                Value<String?> mediaLocalPath = const Value.absent(),
+                Value<int> mediaAvailability = const Value.absent(),
+                Value<Uint8List?> mediaThumbnail = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
                 messageId: messageId,
@@ -2424,6 +3016,14 @@ class $$MessagesTableTableManager
                 createdAt: createdAt,
                 ttl: ttl,
                 signature: signature,
+                mediaType: mediaType,
+                mediaFileName: mediaFileName,
+                mediaMimeType: mediaMimeType,
+                mediaFileSize: mediaFileSize,
+                mediaHash: mediaHash,
+                mediaLocalPath: mediaLocalPath,
+                mediaAvailability: mediaAvailability,
+                mediaThumbnail: mediaThumbnail,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2436,6 +3036,14 @@ class $$MessagesTableTableManager
                 required int createdAt,
                 required int ttl,
                 Value<String?> signature = const Value.absent(),
+                Value<int> mediaType = const Value.absent(),
+                Value<String?> mediaFileName = const Value.absent(),
+                Value<String?> mediaMimeType = const Value.absent(),
+                Value<int?> mediaFileSize = const Value.absent(),
+                Value<String?> mediaHash = const Value.absent(),
+                Value<String?> mediaLocalPath = const Value.absent(),
+                Value<int> mediaAvailability = const Value.absent(),
+                Value<Uint8List?> mediaThumbnail = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
                 messageId: messageId,
@@ -2446,6 +3054,14 @@ class $$MessagesTableTableManager
                 createdAt: createdAt,
                 ttl: ttl,
                 signature: signature,
+                mediaType: mediaType,
+                mediaFileName: mediaFileName,
+                mediaMimeType: mediaMimeType,
+                mediaFileSize: mediaFileSize,
+                mediaHash: mediaHash,
+                mediaLocalPath: mediaLocalPath,
+                mediaAvailability: mediaAvailability,
+                mediaThumbnail: mediaThumbnail,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

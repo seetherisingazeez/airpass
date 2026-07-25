@@ -110,3 +110,51 @@ const double kBloomFilterFalsePositiveRate = 0.01;
 /// This prevents deadlocks if the peer is slow to build their filter
 /// or if payload delivery is delayed.
 const int kBloomFilterTimeoutMs = 3000; // 3 seconds
+
+/// ──────────────────────────────────────────────────────────────────────────────
+/// MULTIMEDIA
+/// ──────────────────────────────────────────────────────────────────────────────
+
+/// Maximum file size allowed for multimedia messages (bytes).
+/// Files larger than this are rejected at the client level.
+const int kMaxMediaFileSizeBytes = 25 * 1024 * 1024; // 25 MB
+
+/// Maximum thumbnail size embedded in the message payload (bytes).
+/// Thumbnails exceeding this are re-compressed to fit.
+const int kMaxThumbnailSizeBytes = 5 * 1024; // 5 KB
+
+/// Thumbnail dimensions (pixels) for image/video previews.
+/// Both width and height are capped at this value (aspect ratio preserved).
+const int kThumbnailMaxDimension = 120;
+
+/// Maximum number of media file transfers per sync connection.
+/// Prevents a single sync from being monopolized by large files.
+/// Text messages always sync first (Phase 2); media is Phase 3.
+const int kMaxMediaSyncsPerConnection = 3;
+
+/// Directory name for storing media files within the app's data directory.
+/// Structure: `{appDir}/airpass_media/{messageId}/{fileName}`
+const String kMediaStorageDir = 'airpass_media';
+
+/// TTL (hop count) for media messages. Lower than text to limit
+/// epidemic amplification of large payloads across the mesh.
+const int kMediaDefaultMaxHops = 5;
+
+/// Time-based TTL for media messages (hours). Shorter than text
+/// (72 hours) to conserve on-device storage.
+const int kMediaMessageTtlHours = 24; // 1 day
+
+/// File size threshold (bytes) for auto-downloading media.
+/// Images/files under this size are fetched automatically during
+/// Phase 3 sync. Larger files require the user to tap "download".
+const int kAutoDownloadMaxBytes = 1 * 1024 * 1024; // 1 MB
+
+/// Magic bytes prefix for media request payloads.
+/// Used to distinguish media requests from Bloom filters and sync payloads
+/// in [NearbyConnectionManager._onPayloadReceived].
+const List<int> kMediaRequestMagic = [0x4D, 0x52]; // 'MR'
+
+/// Magic bytes prefix for media response payloads.
+/// Sent before a FILE payload to tell the receiver which message ID
+/// the incoming file corresponds to.
+const List<int> kMediaResponseMagic = [0x4D, 0x53]; // 'MS'

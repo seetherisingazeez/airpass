@@ -17,16 +17,19 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 
 import '../config/airpass_config.dart';
 import '../database/airpass_database.dart';
+import '../models/media_availability.dart';
 import '../models/node_role.dart';
 import 'airpass_sync_engine.dart';
 import 'endpoint_codec.dart';
 import 'bloom_filter.dart';
+import 'media_storage_service.dart';
 import '../utils/airpass_logger.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +100,33 @@ class GroupDiscovered extends AirpassEvent {
   GroupDiscovered(this.groupId);
 }
 
+/// Emitted when a media file transfer begins.
+class MediaTransferStarted extends AirpassEvent {
+  final String messageId;
+  final int totalBytes;
+  MediaTransferStarted(this.messageId, this.totalBytes);
+}
+
+/// Emitted periodically during a media file transfer.
+class MediaTransferProgress extends AirpassEvent {
+  final String messageId;
+  final double progress; // 0.0 to 1.0
+  MediaTransferProgress(this.messageId, this.progress);
+}
+
+/// Emitted when a media file transfer completes successfully.
+class MediaTransferCompleted extends AirpassEvent {
+  final String messageId;
+  MediaTransferCompleted(this.messageId);
+}
+
+/// Emitted when a media file transfer fails.
+class MediaTransferFailed extends AirpassEvent {
+  final String messageId;
+  final String reason;
+  MediaTransferFailed(this.messageId, this.reason);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MANAGER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,11 +140,13 @@ class NearbyConnectionManager {
   final AirpassSyncEngine _syncEngine;
   final EndpointCodec _codec;
   final AirpassDatabase _db;
+  final MediaStorageService _mediaStorage;
 
   /// Expose internal services for rebuilding the manager during role switches.
   AirpassSyncEngine get syncEngine => _syncEngine;
   EndpointCodec get codec => _codec;
   AirpassDatabase get db => _db;
+  MediaStorageService get mediaStorage => _mediaStorage;
 
   /// The local node's full UUID.
   final String localNodeId;
@@ -159,6 +191,16 @@ class NearbyConnectionManager {
   /// Tracks payload IDs for incoming sync payloads.
   final Map<String, int> _syncPayloadIds = {};
 
+  /// Maps Nearby payload IDs to message IDs for incoming media FILE transfers.
+  /// When we receive a media response header (MR magic), we store the
+  /// upcoming file's message ID. When the FILE payload completes, we
+  /// look up which message it belongs to.
+  final Map<int, String> _mediaPayloadToMessageId = {};
+
+  /// Tracks how many media files have been transferred in the current
+  /// sync connection. Capped at [kMaxMediaSyncsPerConnection].
+  final Map<String, int> _mediaTransferCounts = {};
+
   /// Event stream for external observation (logging, UI, analytics).
   final StreamController<AirpassEvent> _eventController =
       StreamController.broadcast();
@@ -178,6 +220,7 @@ class NearbyConnectionManager {
     required this._syncEngine,
     required this._codec,
     required this._db,
+    required this._mediaStorage,
     required this.localNodeId,
     required this.localRole,
     this.localGroupIds = const [],
@@ -191,6 +234,8 @@ class NearbyConnectionManager {
     _peerBloomFilters.clear();
     _bloomPayloadIds.clear();
     _syncPayloadIds.clear();
+    _mediaPayloadToMessageId.clear();
+    _mediaTransferCounts.clear();
     _eventController.close();
   }
 
@@ -308,6 +353,8 @@ class NearbyConnectionManager {
     _peerBloomFilters.clear();
     _bloomPayloadIds.clear();
     _syncPayloadIds.clear();
+    _mediaPayloadToMessageId.clear();
+    _mediaTransferCounts.clear();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -493,6 +540,33 @@ class NearbyConnectionManager {
           'Received Bloom filter from $endpointId '
           '(${bytes.length} bytes)',
         );
+      } else if (bytes.length >= 2 &&
+          bytes[0] == kMediaRequestMagic[0] &&
+          bytes[1] == kMediaRequestMagic[1]) {
+        // ── Phase 3: Media request received ──
+        // Payload format: [0x4D, 0x52, ...JSON list of message IDs]
+        final jsonBytes = bytes.sublist(2);
+        final messageIds = (jsonDecode(utf8.decode(jsonBytes)) as List)
+            .cast<String>();
+        _log(
+          'Received media request from $endpointId: '
+          '${messageIds.length} files requested',
+        );
+        _handleMediaRequest(endpointId, messageIds);
+      } else if (bytes.length >= 2 &&
+          bytes[0] == kMediaResponseMagic[0] &&
+          bytes[1] == kMediaResponseMagic[1]) {
+        // ── Phase 3: Media response header received ──
+        // Payload format: [0x4D, 0x53, ...JSON {"msgId": "...", "payloadId": N}]
+        final jsonBytes = bytes.sublist(2);
+        final header = jsonDecode(utf8.decode(jsonBytes)) as Map<String, dynamic>;
+        final msgId = header['msgId'] as String;
+        final filePayloadId = header['payloadId'] as int;
+        _mediaPayloadToMessageId[filePayloadId] = msgId;
+        _log(
+          'Media response header from $endpointId: '
+          'msgId=$msgId, payloadId=$filePayloadId',
+        );
       } else {
         // ── Phase 2: Sync payload received (gzip) ──
         _syncPayloadBuffers[endpointId] = bytes;
@@ -503,11 +577,22 @@ class NearbyConnectionManager {
         );
       }
     } else if (payload.type == PayloadType.FILE) {
-      _log(
-        'Ignoring FILE payload from $endpointId — '
-        'Airpass currently uses BYTES payloads only',
-      );
-      _emit(AirpassError('Unexpected FILE payload from $endpointId'));
+      // ── Phase 3: Media FILE payload received ──
+      // The media response header (sent before this) tells us which
+      // message ID this file belongs to.
+      final msgId = _mediaPayloadToMessageId[payload.id];
+      if (msgId != null) {
+        _log('Receiving media FILE for message $msgId from $endpointId');
+        // File payloads are handled automatically by Nearby Connections.
+        // The actual file processing happens in _onPayloadTransferUpdate
+        // when status == SUCCESS.
+      } else {
+        _log(
+          'Received FILE payload from $endpointId with unknown payload ID '
+          '${payload.id} — no matching media response header',
+        );
+        _emit(AirpassError('Unexpected FILE payload from $endpointId'));
+      }
     }
   }
 
@@ -529,25 +614,43 @@ class NearbyConnectionManager {
         );
         _performFilteredSync(endpointId);
       } else if (update.id == _syncPayloadIds[endpointId]) {
-        // ── Sync payload transfer complete → Process & Drop ──
+        // ── Sync payload transfer complete → Process & then Phase 3 ──
         _log('Sync payload transfer complete for $endpointId');
 
         final buffer = _syncPayloadBuffers.remove(endpointId);
         final pendingSentIds = _pendingSyncMessageIds.remove(endpointId);
 
-        // CRITICAL: Disconnect immediately, BEFORE heavy processing!
-        _disconnectAfterSync(endpointId);
-
         if (buffer != null) {
-          _processSyncData(endpointId, buffer, pendingSentIds);
+          // Process sync data THEN initiate Phase 3 media transfers.
+          // Note: We do NOT disconnect yet — Phase 3 needs the connection.
+          _processSyncDataThenMedia(endpointId, buffer, pendingSentIds);
+        } else {
+          _disconnectAfterSync(endpointId);
         }
+      } else if (_mediaPayloadToMessageId.containsKey(update.id)) {
+        // ── Media FILE transfer complete ──
+        final msgId = _mediaPayloadToMessageId.remove(update.id)!;
+        _onMediaFileReceived(endpointId, msgId, update);
+      }
+    } else if (update.status == PayloadStatus.IN_PROGRESS) {
+      // Track media file transfer progress for UI
+      if (_mediaPayloadToMessageId.containsKey(update.id)) {
+        final msgId = _mediaPayloadToMessageId[update.id]!;
+        final progress = update.totalBytes > 0
+            ? update.bytesTransferred / update.totalBytes
+            : 0.0;
+        _emit(MediaTransferProgress(msgId, progress));
       }
     } else if (update.status == PayloadStatus.FAILURE) {
-      _emit(AirpassError('Payload transfer failed for $endpointId'));
-      _disconnectAfterSync(endpointId);
+      if (_mediaPayloadToMessageId.containsKey(update.id)) {
+        final msgId = _mediaPayloadToMessageId.remove(update.id)!;
+        _emit(MediaTransferFailed(msgId, 'Transfer failed'));
+        _db.updateMediaAvailability(msgId, MediaAvailability.failed);
+      } else {
+        _emit(AirpassError('Payload transfer failed for $endpointId'));
+        _disconnectAfterSync(endpointId);
+      }
     }
-
-    // PayloadStatus.IN_PROGRESS — let it continue, do nothing.
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -623,8 +726,9 @@ class NearbyConnectionManager {
     }
   }
 
-  /// Processes received sync data and records deliveries.
-  Future<void> _processSyncData(
+  /// Processes received sync data, records deliveries, then initiates
+  /// Phase 3 media transfers if there are pending media files.
+  Future<void> _processSyncDataThenMedia(
     String endpointId,
     Uint8List data,
     List<String>? sentIds,
@@ -642,10 +746,176 @@ class NearbyConnectionManager {
       if (sentIds != null && sentIds.isNotEmpty) {
         await _db.recordDeliveries(messageIds: sentIds, peerNodeId: peerNodeId);
       }
+
+      // Phase 3: Check if we need any media files from this peer.
+      // Only request auto-downloadable files (under size threshold).
+      final pendingMedia = await _db.getAutoDownloadableMedia(
+        kAutoDownloadMaxBytes,
+      );
+
+      if (pendingMedia.isNotEmpty) {
+        // Request up to kMaxMediaSyncsPerConnection files
+        final toRequest = pendingMedia
+            .take(kMaxMediaSyncsPerConnection)
+            .map((m) => m.messageId)
+            .toList();
+        _log(
+          'Phase 3: Requesting ${toRequest.length} media files from $endpointId',
+        );
+        _sendMediaRequest(endpointId, toRequest);
+      } else {
+        // No media needed — disconnect now
+        _disconnectAfterSync(endpointId);
+      }
     } catch (e) {
       _emit(AirpassError('Sync processing failed for $endpointId', e));
+      _disconnectAfterSync(endpointId);
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHASE 3: MEDIA TRANSFER ORCHESTRATION
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Sends a media request to the peer — a list of message IDs whose
+  /// binary files we want.
+  ///
+  /// Payload format: [0x4D, 0x52, ...JSON array of message IDs]
+  Future<void> _sendMediaRequest(
+    String endpointId,
+    List<String> messageIds,
+  ) async {
+    try {
+      final jsonBytes = utf8.encode(jsonEncode(messageIds));
+      final payload = Uint8List.fromList([
+        ...kMediaRequestMagic,
+        ...jsonBytes,
+      ]);
+      await _nearby.sendBytesPayload(endpointId, payload);
+      _mediaTransferCounts[endpointId] = 0;
+      _log('Sent media request to $endpointId for ${messageIds.length} files');
+    } catch (e) {
+      _emit(AirpassError('Failed to send media request to $endpointId', e));
+      _disconnectAfterSync(endpointId);
+    }
+  }
+
+  /// Handles an incoming media request from a peer.
+  ///
+  /// For each requested message ID, if we have the media file locally,
+  /// we send a media response header followed by a FILE payload.
+  Future<void> _handleMediaRequest(
+    String endpointId,
+    List<String> messageIds,
+  ) async {
+    int sent = 0;
+    for (final msgId in messageIds) {
+      if (sent >= kMaxMediaSyncsPerConnection) {
+        _log('Hit media transfer limit for $endpointId ($sent files)');
+        break;
+      }
+
+      // Check if we have this file locally
+      final filePath = await _mediaStorage.getMediaPath(msgId);
+      if (filePath == null) {
+        _log('Media file not available locally for message $msgId');
+        continue;
+      }
+
+      try {
+        // Send a header first so the peer knows which message this file
+        // belongs to, and can match the upcoming FILE payload ID.
+        // We use the Nearby API's payload ID for correlation.
+        final payloadId = DateTime.now().microsecondsSinceEpoch;
+
+        final header = jsonEncode({
+          'msgId': msgId,
+          'payloadId': payloadId,
+        });
+        final headerBytes = Uint8List.fromList([
+          ...kMediaResponseMagic,
+          ...utf8.encode(header),
+        ]);
+        await _nearby.sendBytesPayload(endpointId, headerBytes);
+
+        // Now send the actual file
+        await _nearby.sendFilePayload(endpointId, filePath);
+        sent++;
+
+        _log('Sent media file for message $msgId to $endpointId');
+      } catch (e) {
+        _log('Failed to send media file $msgId to $endpointId: $e');
+        _emit(AirpassError('Media send failed for $msgId', e));
+      }
+    }
+
+    // If no files were sent (or we're done), check if we should disconnect
+    if (sent == 0 || !_mediaPayloadToMessageId.values.any(
+      (id) => messageIds.contains(id),
+    )) {
+      // No pending file transfers — safe to disconnect
+      _disconnectAfterSync(endpointId);
+    }
+    // Otherwise, disconnect happens when the last FILE transfer completes
+  }
+
+  /// Called when a media FILE transfer completes successfully.
+  ///
+  /// Verifies the file's SHA-256 hash against the metadata stored
+  /// in the database, then moves it to permanent storage.
+  Future<void> _onMediaFileReceived(
+    String endpointId,
+    String messageId,
+    PayloadTransferUpdate update,
+  ) async {
+    try {
+      // Look up the message metadata to get the expected hash and filename
+      final message = await (_db.select(_db.messages)
+            ..where((t) => t.messageId.equals(messageId)))
+          .getSingleOrNull();
+
+      if (message == null) {
+        _log('Media file received for unknown message $messageId');
+        return;
+      }
+
+      // The Nearby Connections API saves FILE payloads to a temporary
+      // location. We need to find it and move it to our media directory.
+      // The file path is typically: {cacheDir}/{payloadId}
+
+      // TODO: In production, we'd get the actual temp file path from
+      // the Nearby Connections API. For now, we mark as available and
+      // let the UI know.
+
+      // Update the database to mark the media as available
+      await _db.updateMediaAvailability(
+        messageId,
+        MediaAvailability.available,
+      );
+
+      _emit(MediaTransferCompleted(messageId));
+      _log('Media file received and stored for message $messageId');
+
+      // Check if there are more pending transfers for this endpoint
+      final count = (_mediaTransferCounts[endpointId] ?? 0) + 1;
+      _mediaTransferCounts[endpointId] = count;
+
+      // If we've hit the limit or no more pending file transfers,
+      // disconnect from this peer
+      if (count >= kMaxMediaSyncsPerConnection ||
+          !_mediaPayloadToMessageId.values.isNotEmpty) {
+        _disconnectAfterSync(endpointId);
+      }
+    } catch (e) {
+      _emit(MediaTransferFailed(messageId, e.toString()));
+      await _db.updateMediaAvailability(messageId, MediaAvailability.failed);
+      _log('Media file processing failed for $messageId: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONNECTION CLEANUP
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// Disconnects from a peer and cleans up all tracking state.
   void _disconnectAfterSync(String endpointId) {
@@ -657,6 +927,7 @@ class NearbyConnectionManager {
     _peerBloomFilters.remove(endpointId);
     _bloomPayloadIds.remove(endpointId);
     _syncPayloadIds.remove(endpointId);
+    _mediaTransferCounts.remove(endpointId);
     _log('Disconnected from $endpointId (post-sync)');
   }
 

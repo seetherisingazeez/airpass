@@ -29,6 +29,8 @@ import 'package:nearby_connections/nearby_connections.dart';
 
 import '../config/airpass_config.dart';
 import '../database/airpass_database.dart';
+import '../models/media_availability.dart';
+import '../models/media_type.dart';
 import '../models/node_role.dart';
 import 'bloom_filter.dart';
 import 'message_signer.dart';
@@ -138,6 +140,10 @@ class SyncNodeEntry {
 }
 
 /// A message entry within a [SyncPayload].
+///
+/// For media messages, only the metadata and thumbnail are included.
+/// The actual binary file is transferred separately via Nearby's
+/// FILE payload API (Phase 3).
 class SyncMessageEntry {
   final String messageId;
   final String senderId;
@@ -148,6 +154,28 @@ class SyncMessageEntry {
   final int ttl;
   final String? signature;
 
+  // ─── Media Metadata ───
+  // These travel through the mesh. The actual binary does NOT.
+
+  /// Media type (0 = text, 1 = image, 2 = video, etc.).
+  final int mediaType;
+
+  /// Original filename (e.g., 'photo_001.jpg'). Null for text.
+  final String? mediaFileName;
+
+  /// MIME type (e.g., 'image/jpeg'). Null for text.
+  final String? mediaMimeType;
+
+  /// Size of the full media file in bytes. Null for text.
+  final int? mediaFileSize;
+
+  /// SHA-256 hash of the full media file. Null for text.
+  final String? mediaHash;
+
+  /// Base64-encoded thumbnail bytes (≤5 KB). Null for text or
+  /// media types that don't support thumbnails.
+  final String? thumbnailBase64;
+
   const SyncMessageEntry({
     required this.messageId,
     required this.senderId,
@@ -157,7 +185,16 @@ class SyncMessageEntry {
     required this.createdAt,
     required this.ttl,
     this.signature,
+    this.mediaType = 0,
+    this.mediaFileName,
+    this.mediaMimeType,
+    this.mediaFileSize,
+    this.mediaHash,
+    this.thumbnailBase64,
   });
+
+  /// Whether this message carries a media attachment.
+  bool get isMedia => mediaType != MediaType.text.value;
 
   Map<String, dynamic> toJson() => {
     'id': messageId,
@@ -168,6 +205,13 @@ class SyncMessageEntry {
     'ts': createdAt,
     'ttl': ttl,
     if (signature != null) 'sig': signature,
+    // Media metadata — only included for media messages
+    if (mediaType != 0) 'mt': mediaType,
+    if (mediaFileName != null) 'mfn': mediaFileName,
+    if (mediaMimeType != null) 'mmt': mediaMimeType,
+    if (mediaFileSize != null) 'mfs': mediaFileSize,
+    if (mediaHash != null) 'mh': mediaHash,
+    if (thumbnailBase64 != null) 'thumb': thumbnailBase64,
   };
 
   factory SyncMessageEntry.fromJson(Map<String, dynamic> json) {
@@ -180,6 +224,12 @@ class SyncMessageEntry {
       createdAt: json['ts'] as int,
       ttl: json['ttl'] as int,
       signature: json['sig'] as String?,
+      mediaType: json['mt'] as int? ?? 0,
+      mediaFileName: json['mfn'] as String?,
+      mediaMimeType: json['mmt'] as String?,
+      mediaFileSize: json['mfs'] as int?,
+      mediaHash: json['mh'] as String?,
+      thumbnailBase64: json['thumb'] as String?,
     );
   }
 }
@@ -326,6 +376,15 @@ class AirpassSyncEngine {
               createdAt: m.createdAt,
               ttl: m.ttl - 1, // Decrement TTL on relay
               signature: sig,
+              // Media metadata — propagates through the mesh
+              mediaType: m.mediaType,
+              mediaFileName: m.mediaFileName,
+              mediaMimeType: m.mediaMimeType,
+              mediaFileSize: m.mediaFileSize,
+              mediaHash: m.mediaHash,
+              thumbnailBase64: m.mediaThumbnail != null
+                  ? base64Encode(m.mediaThumbnail!)
+                  : null,
             );
           })
           .where((m) => m.ttl > 0) // Don't send expired messages
@@ -479,6 +538,15 @@ class AirpassSyncEngine {
               createdAt: m.createdAt,
               ttl: m.ttl - 1,
               signature: sig,
+              // Media metadata — propagates through the mesh
+              mediaType: m.mediaType,
+              mediaFileName: m.mediaFileName,
+              mediaMimeType: m.mediaMimeType,
+              mediaFileSize: m.mediaFileSize,
+              mediaHash: m.mediaHash,
+              thumbnailBase64: m.mediaThumbnail != null
+                  ? base64Encode(m.mediaThumbnail!)
+                  : null,
             );
           })
           .where((m) => m.ttl > 0)
@@ -678,6 +746,25 @@ class AirpassSyncEngine {
           createdAt: Value(incoming.createdAt),
           ttl: Value(incoming.ttl),
           signature: Value(incoming.signature),
+          // Media metadata — store what arrived through the mesh
+          mediaType: Value(incoming.mediaType),
+          mediaFileName: Value(incoming.mediaFileName),
+          mediaMimeType: Value(incoming.mediaMimeType),
+          mediaFileSize: Value(incoming.mediaFileSize),
+          mediaHash: Value(incoming.mediaHash),
+          mediaThumbnail: Value(
+            incoming.thumbnailBase64 != null
+                ? Uint8List.fromList(base64Decode(incoming.thumbnailBase64!))
+                : null,
+          ),
+          // Binary is NOT available yet — it travels separately via Phase 3.
+          // Text messages (mediaType == 0) stay at notApplicable.
+          mediaAvailability: Value(
+            incoming.isMedia
+                ? MediaAvailability.pendingDownload.value
+                : MediaAvailability.notApplicable.value,
+          ),
+          mediaLocalPath: const Value(null),
         ),
       );
 
@@ -713,9 +800,30 @@ class AirpassSyncEngine {
               title = '$senderName in $groupName';
             }
 
-            final messageText = utf8.decode(
-              base64Decode(incoming.payloadBase64),
-            );
+            // Build notification body — media messages show a descriptive label
+            // instead of trying to UTF-8 decode binary data.
+            final String messageText;
+            if (incoming.isMedia) {
+              final mediaLabel = switch (MediaType.fromValue(incoming.mediaType)) {
+                MediaType.image => '📷 Photo',
+                MediaType.video => '🎥 Video',
+                MediaType.audio => '🎵 Voice message',
+                MediaType.file => '📎 ${incoming.mediaFileName ?? 'File'}',
+                MediaType.text => '', // Won't reach here due to isMedia check
+              };
+              // If there's a text caption alongside the media, show both
+              final captionBytes = base64Decode(incoming.payloadBase64);
+              final caption = captionBytes.isNotEmpty
+                  ? utf8.decode(captionBytes, allowMalformed: true)
+                  : '';
+              messageText = caption.isNotEmpty
+                  ? '$mediaLabel: $caption'
+                  : mediaLabel;
+            } else {
+              messageText = utf8.decode(
+                base64Decode(incoming.payloadBase64),
+              );
+            }
 
             NotificationHelper.showNewMessageNotification(
               title: title,
