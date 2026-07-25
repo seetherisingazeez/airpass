@@ -243,15 +243,25 @@ class EndpointCodec {
       return true;
     }
 
-    // Rule 2: Any overlapping group.
-    final local = localGroupIds ?? ['*'];
-    for (final localGroup in local) {
-      if (localGroup != '*' && remote.groupIds.contains(localGroup)) {
+    // Rule 2: If we are ungrouped, we should connect to peers to discover the mesh
+    // and receive global broadcasts.
+    if (localGroupIds == null || localGroupIds.isEmpty) {
+      return true;
+    }
+
+    // Rule 3: If the remote is ungrouped, we can connect to them so they can join the mesh.
+    if (remote.groupIds.contains('*')) {
+      return true;
+    }
+
+    // Rule 4: Any overlapping group.
+    for (final localGroup in localGroupIds) {
+      if (remote.groupIds.contains(localGroup)) {
         return true;
       }
     }
 
-    // Rule 3: No overlap, neither is global — skip.
+    // Rule 5: No overlap, neither is global, neither is ungrouped — skip.
     return false;
   }
 

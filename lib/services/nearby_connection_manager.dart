@@ -823,14 +823,15 @@ class NearbyConnectionManager {
       }
 
       try {
-        // Send a header first so the peer knows which message this file
-        // belongs to, and can match the upcoming FILE payload ID.
-        // We use the Nearby API's payload ID for correlation.
-        final payloadId = DateTime.now().microsecondsSinceEpoch;
+        // Start sending the file first to get its actual payload ID generated
+        // by the Nearby API. We use this payload ID for correlation on the receiver.
+        final filePayloadId = await _nearby.sendFilePayload(endpointId, filePath);
 
+        // Send a header so the peer knows which message this file belongs to,
+        // and can match the FILE payload ID when it completes.
         final header = jsonEncode({
           'msgId': msgId,
-          'payloadId': payloadId,
+          'payloadId': filePayloadId,
         });
         final headerBytes = Uint8List.fromList([
           ...kMediaResponseMagic,
@@ -838,8 +839,6 @@ class NearbyConnectionManager {
         ]);
         await _nearby.sendBytesPayload(endpointId, headerBytes);
 
-        // Now send the actual file
-        await _nearby.sendFilePayload(endpointId, filePath);
         sent++;
 
         _log('Sent media file for message $msgId to $endpointId');
