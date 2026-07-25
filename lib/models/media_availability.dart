@@ -29,7 +29,10 @@ enum MediaAvailability {
 
   /// Transfer failed or source peer is unreachable.
   /// The UI should offer a retry button.
-  failed(4);
+  failed(4),
+
+  /// User manually requested download for a large file.
+  manualDownloadRequested(5);
 
   const MediaAvailability(this.value);
 

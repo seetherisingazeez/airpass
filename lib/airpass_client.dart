@@ -495,16 +495,11 @@ class AirpassClient {
 
   /// Manually requests download of a media file.
   ///
-  /// Sets the media availability to [MediaAvailability.pendingDownload]
-  /// so that the next sync with a peer that has the file will fetch it
-  /// during Phase 3.
-  ///
-  /// Use this for files that are too large for auto-download
-  /// (over [kAutoDownloadMaxBytes]).
+  /// Queue a manual media download and immediately try to fetch it.
   Future<void> requestMediaDownload(String messageId) async {
     await _db.updateMediaAvailability(
       messageId,
-      MediaAvailability.pendingDownload,
+      MediaAvailability.manualDownloadRequested,
     );
     _log('Queued manual media download for message $messageId');
 

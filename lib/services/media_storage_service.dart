@@ -74,6 +74,12 @@ class MediaStorageService {
     return msgDir.path;
   }
 
+  /// Returns the intended absolute path for a specific media file.
+  Future<String> getMediaFilePath(String messageId, String fileName) async {
+    final dir = await _getMessageMediaDir(messageId);
+    return p.join(dir, fileName);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // SAVE / RETRIEVE
   // ─────────────────────────────────────────────────────────────────────────

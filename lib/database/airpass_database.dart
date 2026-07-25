@@ -537,13 +537,13 @@ class AirpassDatabase extends _$AirpassDatabase {
   }
 
   /// Returns pending media messages that qualify for auto-download
-  /// (file size under [maxAutoDownloadBytes]).
-  Future<List<Message>> getAutoDownloadableMedia(int maxAutoDownloadBytes) {
+  /// (file size under [maxAutoDownloadBytes]) OR were manually requested.
+  Future<List<Message>> getPendingMediaForSync(int maxAutoDownloadBytes) {
     return (select(messages)
           ..where((t) =>
-              t.mediaAvailability.equals(
-                  MediaAvailability.pendingDownload.value) &
-              t.mediaFileSize.isSmallerOrEqualValue(maxAutoDownloadBytes)))
+              (t.mediaAvailability.equals(MediaAvailability.pendingDownload.value) &
+                  t.mediaFileSize.isSmallerOrEqualValue(maxAutoDownloadBytes)) |
+              t.mediaAvailability.equals(MediaAvailability.manualDownloadRequested.value)))
         .get();
   }
 

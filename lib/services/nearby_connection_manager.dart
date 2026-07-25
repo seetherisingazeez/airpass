@@ -20,6 +20,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 
 import '../config/airpass_config.dart';
@@ -197,9 +198,18 @@ class NearbyConnectionManager {
   /// look up which message it belongs to.
   final Map<int, String> _mediaPayloadToMessageId = {};
 
+  /// Maps Nearby payload IDs to their temporary URIs for incoming media.
+  final Map<int, String> _mediaPayloadToUri = {};
+
   /// Tracks how many media files have been transferred in the current
   /// sync connection. Capped at [kMaxMediaSyncsPerConnection].
   final Map<String, int> _mediaTransferCounts = {};
+
+  /// Timers for pending disconnections to allow media requests to arrive.
+  final Map<String, Timer> _disconnectTimers = {};
+
+  /// Outgoing media payloads we are currently sending (payloadId -> endpointId).
+  final Map<int, String> _outgoingMediaPayloads = {};
 
   /// Event stream for external observation (logging, UI, analytics).
   final StreamController<AirpassEvent> _eventController =
@@ -236,6 +246,11 @@ class NearbyConnectionManager {
     _syncPayloadIds.clear();
     _mediaPayloadToMessageId.clear();
     _mediaTransferCounts.clear();
+    for (final t in _disconnectTimers.values) {
+      t.cancel();
+    }
+    _disconnectTimers.clear();
+    _outgoingMediaPayloads.clear();
     _eventController.close();
   }
 
@@ -355,6 +370,11 @@ class NearbyConnectionManager {
     _syncPayloadIds.clear();
     _mediaPayloadToMessageId.clear();
     _mediaTransferCounts.clear();
+    for (final t in _disconnectTimers.values) {
+      t.cancel();
+    }
+    _disconnectTimers.clear();
+    _outgoingMediaPayloads.clear();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -582,6 +602,7 @@ class NearbyConnectionManager {
       // message ID this file belongs to.
       final msgId = _mediaPayloadToMessageId[payload.id];
       if (msgId != null) {
+        _mediaPayloadToUri[payload.id] = payload.uri ?? payload.filePath ?? '';
         _log('Receiving media FILE for message $msgId from $endpointId');
         // File payloads are handled automatically by Nearby Connections.
         // The actual file processing happens in _onPayloadTransferUpdate
@@ -630,7 +651,15 @@ class NearbyConnectionManager {
       } else if (_mediaPayloadToMessageId.containsKey(update.id)) {
         // ── Media FILE transfer complete ──
         final msgId = _mediaPayloadToMessageId.remove(update.id)!;
-        _onMediaFileReceived(endpointId, msgId, update);
+        final tempUri = _mediaPayloadToUri.remove(update.id);
+        _onMediaFileReceived(endpointId, msgId, update, tempUri);
+      } else if (_outgoingMediaPayloads.containsKey(update.id)) {
+        // ── Outgoing Media FILE transfer complete ──
+        final peerId = _outgoingMediaPayloads.remove(update.id)!;
+        // Schedule disconnect if there are no other outgoing payloads for this peer
+        if (!_outgoingMediaPayloads.values.contains(peerId)) {
+           _disconnectAfterSync(peerId);
+        }
       }
     } else if (update.status == PayloadStatus.IN_PROGRESS) {
       // Track media file transfer progress for UI
@@ -646,9 +675,14 @@ class NearbyConnectionManager {
         final msgId = _mediaPayloadToMessageId.remove(update.id)!;
         _emit(MediaTransferFailed(msgId, 'Transfer failed'));
         _db.updateMediaAvailability(msgId, MediaAvailability.failed);
+      } else if (_outgoingMediaPayloads.containsKey(update.id)) {
+        final peerId = _outgoingMediaPayloads.remove(update.id)!;
+        if (!_outgoingMediaPayloads.values.contains(peerId)) {
+           _disconnectAfterSync(peerId);
+        }
       } else {
         _emit(AirpassError('Payload transfer failed for $endpointId'));
-        _disconnectAfterSync(endpointId);
+        _disconnectAfterSync(endpointId, immediate: true);
       }
     }
   }
@@ -748,8 +782,8 @@ class NearbyConnectionManager {
       }
 
       // Phase 3: Check if we need any media files from this peer.
-      // Only request auto-downloadable files (under size threshold).
-      final pendingMedia = await _db.getAutoDownloadableMedia(
+      // Request auto-downloadable files and any manually requested files.
+      final pendingMedia = await _db.getPendingMediaForSync(
         kAutoDownloadMaxBytes,
       );
 
@@ -823,9 +857,12 @@ class NearbyConnectionManager {
       }
 
       try {
+        _disconnectTimers[endpointId]?.cancel();
+
         // Start sending the file first to get its actual payload ID generated
         // by the Nearby API. We use this payload ID for correlation on the receiver.
         final filePayloadId = await _nearby.sendFilePayload(endpointId, filePath);
+        _outgoingMediaPayloads[filePayloadId] = endpointId;
 
         // Send a header so the peer knows which message this file belongs to,
         // and can match the FILE payload ID when it completes.
@@ -866,6 +903,7 @@ class NearbyConnectionManager {
     String endpointId,
     String messageId,
     PayloadTransferUpdate update,
+    String? tempUri,
   ) async {
     try {
       // Look up the message metadata to get the expected hash and filename
@@ -878,18 +916,22 @@ class NearbyConnectionManager {
         return;
       }
 
-      // The Nearby Connections API saves FILE payloads to a temporary
-      // location. We need to find it and move it to our media directory.
-      // The file path is typically: {cacheDir}/{payloadId}
-
-      // TODO: In production, we'd get the actual temp file path from
-      // the Nearby Connections API. For now, we mark as available and
-      // let the UI know.
+      String? finalPath;
+      if (tempUri != null && tempUri.isNotEmpty) {
+        final fileName = message.mediaFileName ?? 'media_$messageId';
+        final destPath = await _mediaStorage.getMediaFilePath(messageId, fileName);
+        await const MethodChannel('airpass').invokeMethod('copyFileAndDeleteOriginal', {
+          'sourceUri': tempUri,
+          'destinationFilepath': destPath,
+        });
+        finalPath = destPath;
+      }
 
       // Update the database to mark the media as available
       await _db.updateMediaAvailability(
         messageId,
         MediaAvailability.available,
+        localPath: finalPath,
       );
 
       _emit(MediaTransferCompleted(messageId));
@@ -917,7 +959,23 @@ class NearbyConnectionManager {
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Disconnects from a peer and cleans up all tracking state.
-  void _disconnectAfterSync(String endpointId) {
+  /// If [immediate] is false, schedules a short delay to allow the peer
+  /// to request media files before dropping the connection.
+  void _disconnectAfterSync(String endpointId, {bool immediate = false}) {
+    if (immediate) {
+      _executeDisconnect(endpointId);
+    } else {
+      _disconnectTimers[endpointId]?.cancel();
+      _disconnectTimers[endpointId] = Timer(const Duration(seconds: 2), () {
+        _executeDisconnect(endpointId);
+      });
+    }
+  }
+
+  void _executeDisconnect(String endpointId) {
+    _disconnectTimers[endpointId]?.cancel();
+    _disconnectTimers.remove(endpointId);
+    
     _nearby.disconnectFromEndpoint(endpointId);
     _activeEndpoints.remove(endpointId);
     _endpointToNodeId.remove(endpointId);
