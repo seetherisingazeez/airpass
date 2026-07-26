@@ -57,6 +57,12 @@ class AirpassPermissions {
     // Request all missing permissions
     final statuses = await permissionsToRequest.request();
 
+    // Sequentially request background location if foreground location was granted (Android 10+)
+    if (sdkInt >= 29 && statuses[Permission.location] == PermissionStatus.granted) {
+      final bgStatus = await Permission.locationAlways.request();
+      statuses[Permission.locationAlways] = bgStatus;
+    }
+
     // Check if any mandatory permission was denied
     bool allGranted = true;
     for (final entry in statuses.entries) {
@@ -84,6 +90,10 @@ class AirpassPermissions {
       Permission.location,
       Permission.notification,
     ];
+
+    if (sdkInt >= 29) { // Android 10+
+      permissionsToCheck.add(Permission.locationAlways);
+    }
 
     if (sdkInt >= 31) { // Android 12+
       permissionsToCheck.addAll([
