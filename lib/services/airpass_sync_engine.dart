@@ -102,6 +102,7 @@ class SyncNodeEntry {
   final String? displayName;
   final int? batteryLevel;
   final bool hasInternetAccess;
+  final String? metadata;
 
   const SyncNodeEntry({
     required this.nodeId,
@@ -112,6 +113,7 @@ class SyncNodeEntry {
     this.displayName,
     this.batteryLevel,
     this.hasInternetAccess = false,
+    this.metadata,
   });
 
   Map<String, dynamic> toJson() => {
@@ -123,6 +125,7 @@ class SyncNodeEntry {
     if (displayName != null) 'n': displayName,
     if (batteryLevel != null) 'bl': batteryLevel,
     if (hasInternetAccess) 'net': hasInternetAccess,
+    if (metadata != null) 'm': metadata,
   };
 
   factory SyncNodeEntry.fromJson(Map<String, dynamic> json) {
@@ -135,6 +138,7 @@ class SyncNodeEntry {
       displayName: json['n'] as String?,
       batteryLevel: json['bl'] as int?,
       hasInternetAccess: json['net'] as bool? ?? false,
+      metadata: json['m'] as String?,
     );
   }
 }
@@ -273,6 +277,9 @@ class AirpassSyncEngine {
   /// Whether the local node currently has internet access.
   bool localHasInternetAccess;
 
+  /// The local user's selected skills.
+  List<String> localSkills;
+
   AirpassSyncEngine({
     required AirpassDatabase database,
     required this.localNodeId,
@@ -281,6 +288,7 @@ class AirpassSyncEngine {
     this.localDisplayName,
     this.localBatteryLevel,
     this.localHasInternetAccess = false,
+    this.localSkills = const [],
   }) : _db = database,
        _signer = MessageSigner(nodeId: localNodeId);
 
@@ -317,6 +325,7 @@ class AirpassSyncEngine {
                   displayName: localDisplayName,
                   batteryLevel: localBatteryLevel,
                   hasInternetAccess: localHasInternetAccess,
+                  metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
                 ),
               )
               .toList()
@@ -330,6 +339,7 @@ class AirpassSyncEngine {
               displayName: localDisplayName,
               batteryLevel: localBatteryLevel,
               hasInternetAccess: localHasInternetAccess,
+              metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
             ),
           ];
 
@@ -352,6 +362,7 @@ class AirpassSyncEngine {
             displayName: n.displayName,
             batteryLevel: n.batteryLevel,
             hasInternetAccess: n.hasInternetAccess,
+            metadata: n.metadata,
           ),
         ),
       ],
@@ -482,6 +493,7 @@ class AirpassSyncEngine {
                   displayName: localDisplayName,
                   batteryLevel: localBatteryLevel,
                   hasInternetAccess: localHasInternetAccess,
+                  metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
                 ),
               )
               .toList()
@@ -495,6 +507,7 @@ class AirpassSyncEngine {
               displayName: localDisplayName,
               batteryLevel: localBatteryLevel,
               hasInternetAccess: localHasInternetAccess,
+              metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
             ),
           ];
 
@@ -515,6 +528,7 @@ class AirpassSyncEngine {
             displayName: n.displayName,
             batteryLevel: n.batteryLevel,
             hasInternetAccess: n.hasInternetAccess,
+            metadata: n.metadata,
           ),
         ),
       ],
@@ -653,6 +667,7 @@ class AirpassSyncEngine {
         displayName: Value(peerSelfEntry?.displayName),
         batteryLevel: Value(peerSelfEntry?.batteryLevel),
         hasInternetAccess: Value(peerSelfEntry?.hasInternetAccess ?? false),
+        metadata: Value(peerSelfEntry?.metadata),
       ),
     );
 
@@ -679,10 +694,8 @@ class AirpassSyncEngine {
             displayName: Value(incoming.displayName),
             batteryLevel: Value(incoming.batteryLevel),
             hasInternetAccess: Value(incoming.hasInternetAccess),
-            // Preserve existing metadata if we're updating
-            metadata: existing != null
-                ? Value(existing.metadata)
-                : const Value(null),
+            // We overwrite metadata with incoming since it's fresher data
+            metadata: Value(incoming.metadata),
           ),
         );
       }

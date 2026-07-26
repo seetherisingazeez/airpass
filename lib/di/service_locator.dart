@@ -41,6 +41,9 @@ const String _kNodeRoleKey = 'airpass_local_node_role';
 /// SharedPreferences key for the user's chosen display name.
 const String _kDisplayNameKey = 'airpass_local_display_name';
 
+/// SharedPreferences key for the user's selected skills.
+const String _kSkillsKey = 'airpass_local_skills';
+
 /// SharedPreferences key for the persisted local group ID.
 /// (Legacy — kept for migration. Multi-group is now persisted in the DB.)
 const String _kGroupIdKey = 'airpass_local_group_id';
@@ -65,6 +68,7 @@ Future<void> setupAirpassServiceLocator() async {
   final nodeId = await _loadOrCreateNodeId(prefs);
   final role = _loadNodeRole(prefs);
   final displayName = prefs.getString(_kDisplayNameKey);
+  final skills = prefs.getStringList(_kSkillsKey) ?? [];
 
   // ─── Register database ───
   getIt.registerLazySingleton<AirpassDatabase>(() => AirpassDatabase());
@@ -90,6 +94,7 @@ Future<void> setupAirpassServiceLocator() async {
       localRole: role,
       localGroupIds: groupIds,
       localDisplayName: displayName,
+      localSkills: skills,
     ),
   );
 
@@ -128,6 +133,7 @@ Future<void> setupAirpassServiceLocator() async {
   if (displayName != null) {
     getIt.registerSingleton<String>(displayName, instanceName: 'localDisplayName');
   }
+  getIt.registerSingleton<List<String>>(skills, instanceName: 'localSkills');
 }
 
 /// Loads the local node UUID from SharedPreferences, or generates
@@ -181,18 +187,25 @@ Future<void> updateLocalGroupId(String? newGroupId) async {
   }
 }
 
-/// Saves the user's chosen display name and registers it in GetIt.
-Future<void> setLocalDisplayName(String name) async {
+/// Saves the user's chosen profile data (name and skills) and registers it in GetIt.
+Future<void> setLocalUserProfile(String name, List<String> skills) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(_kDisplayNameKey, name);
+  await prefs.setStringList(_kSkillsKey, skills);
   
   if (getIt.isRegistered<String>(instanceName: 'localDisplayName')) {
     getIt.unregister<String>(instanceName: 'localDisplayName');
   }
   getIt.registerSingleton<String>(name, instanceName: 'localDisplayName');
   
-  // Also update the sync engine so future syncs broadcast the new name
+  if (getIt.isRegistered<List<String>>(instanceName: 'localSkills')) {
+    getIt.unregister<List<String>>(instanceName: 'localSkills');
+  }
+  getIt.registerSingleton<List<String>>(skills, instanceName: 'localSkills');
+  
+  // Also update the sync engine so future syncs broadcast the new name and skills
   if (getIt.isRegistered<AirpassSyncEngine>()) {
     getIt<AirpassSyncEngine>().localDisplayName = name;
+    getIt<AirpassSyncEngine>().localSkills = skills;
   }
 }
