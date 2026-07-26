@@ -44,6 +44,9 @@ const String _kDisplayNameKey = 'airpass_local_display_name';
 /// SharedPreferences key for the user's selected skills.
 const String _kSkillsKey = 'airpass_local_skills';
 
+/// SharedPreferences key for the user's phone number.
+const String _kPhoneKey = 'airpass_local_phone';
+
 /// SharedPreferences key for the persisted local group ID.
 /// (Legacy — kept for migration. Multi-group is now persisted in the DB.)
 const String _kGroupIdKey = 'airpass_local_group_id';
@@ -69,6 +72,7 @@ Future<void> setupAirpassServiceLocator() async {
   final role = _loadNodeRole(prefs);
   final displayName = prefs.getString(_kDisplayNameKey);
   final skills = prefs.getStringList(_kSkillsKey) ?? [];
+  final phone = prefs.getString(_kPhoneKey);
 
   // ─── Register database ───
   getIt.registerLazySingleton<AirpassDatabase>(() => AirpassDatabase());
@@ -95,6 +99,7 @@ Future<void> setupAirpassServiceLocator() async {
       localGroupIds: groupIds,
       localDisplayName: displayName,
       localSkills: skills,
+      localPhone: phone,
     ),
   );
 
@@ -134,6 +139,9 @@ Future<void> setupAirpassServiceLocator() async {
     getIt.registerSingleton<String>(displayName, instanceName: 'localDisplayName');
   }
   getIt.registerSingleton<List<String>>(skills, instanceName: 'localSkills');
+  if (phone != null) {
+    getIt.registerSingleton<String>(phone, instanceName: 'localPhone');
+  }
 }
 
 /// Loads the local node UUID from SharedPreferences, or generates
@@ -188,10 +196,16 @@ Future<void> updateLocalGroupId(String? newGroupId) async {
 }
 
 /// Saves the user's chosen profile data (name and skills) and registers it in GetIt.
-Future<void> setLocalUserProfile(String name, List<String> skills) async {
+Future<void> setLocalUserProfile(String name, List<String> skills, {String? phone}) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(_kDisplayNameKey, name);
   await prefs.setStringList(_kSkillsKey, skills);
+  
+  if (phone != null && phone.isNotEmpty) {
+    await prefs.setString(_kPhoneKey, phone);
+  } else {
+    await prefs.remove(_kPhoneKey);
+  }
   
   if (getIt.isRegistered<String>(instanceName: 'localDisplayName')) {
     getIt.unregister<String>(instanceName: 'localDisplayName');
@@ -202,10 +216,18 @@ Future<void> setLocalUserProfile(String name, List<String> skills) async {
     getIt.unregister<List<String>>(instanceName: 'localSkills');
   }
   getIt.registerSingleton<List<String>>(skills, instanceName: 'localSkills');
+
+  if (getIt.isRegistered<String>(instanceName: 'localPhone')) {
+    getIt.unregister<String>(instanceName: 'localPhone');
+  }
+  if (phone != null && phone.isNotEmpty) {
+    getIt.registerSingleton<String>(phone, instanceName: 'localPhone');
+  }
   
   // Also update the sync engine so future syncs broadcast the new name and skills
   if (getIt.isRegistered<AirpassSyncEngine>()) {
     getIt<AirpassSyncEngine>().localDisplayName = name;
     getIt<AirpassSyncEngine>().localSkills = skills;
+    getIt<AirpassSyncEngine>().localPhone = phone;
   }
 }

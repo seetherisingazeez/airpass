@@ -280,6 +280,9 @@ class AirpassSyncEngine {
   /// The local user's selected skills.
   List<String> localSkills;
 
+  /// The local user's phone number.
+  String? localPhone;
+
   AirpassSyncEngine({
     required AirpassDatabase database,
     required this.localNodeId,
@@ -289,6 +292,7 @@ class AirpassSyncEngine {
     this.localBatteryLevel,
     this.localHasInternetAccess = false,
     this.localSkills = const [],
+    this.localPhone,
   }) : _db = database,
        _signer = MessageSigner(nodeId: localNodeId);
 
@@ -313,6 +317,11 @@ class AirpassSyncEngine {
     // 2. Build self-entries — one per subscribed group so multi-hop peers
     //    learn about ALL of our group memberships.
     final now = DateTime.now().millisecondsSinceEpoch;
+    final Map<String, dynamic> metadataMap = {};
+    if (localSkills.isNotEmpty) metadataMap['skills'] = localSkills;
+    if (localPhone != null && localPhone!.isNotEmpty) metadataMap['phone'] = localPhone;
+    final metadataString = metadataMap.isNotEmpty ? jsonEncode(metadataMap) : null;
+
     final selfEntries = localGroupIds.isNotEmpty
         ? localGroupIds
               .map(
@@ -325,7 +334,7 @@ class AirpassSyncEngine {
                   displayName: localDisplayName,
                   batteryLevel: localBatteryLevel,
                   hasInternetAccess: localHasInternetAccess,
-                  metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
+                  metadata: metadataString,
                 ),
               )
               .toList()
@@ -339,7 +348,7 @@ class AirpassSyncEngine {
               displayName: localDisplayName,
               batteryLevel: localBatteryLevel,
               hasInternetAccess: localHasInternetAccess,
-              metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
+              metadata: metadataString,
             ),
           ];
 
@@ -481,6 +490,11 @@ class AirpassSyncEngine {
 
     // 3. Build self-entries
     final now = DateTime.now().millisecondsSinceEpoch;
+    final Map<String, dynamic> metadataMap = {};
+    if (localSkills.isNotEmpty) metadataMap['skills'] = localSkills;
+    if (localPhone != null && localPhone!.isNotEmpty) metadataMap['phone'] = localPhone;
+    final metadataString = metadataMap.isNotEmpty ? jsonEncode(metadataMap) : null;
+
     final selfEntries = localGroupIds.isNotEmpty
         ? localGroupIds
               .map(
@@ -493,7 +507,7 @@ class AirpassSyncEngine {
                   displayName: localDisplayName,
                   batteryLevel: localBatteryLevel,
                   hasInternetAccess: localHasInternetAccess,
-                  metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
+                  metadata: metadataString,
                 ),
               )
               .toList()
@@ -507,7 +521,7 @@ class AirpassSyncEngine {
               displayName: localDisplayName,
               batteryLevel: localBatteryLevel,
               hasInternetAccess: localHasInternetAccess,
-              metadata: localSkills.isNotEmpty ? jsonEncode({'skills': localSkills}) : null,
+              metadata: metadataString,
             ),
           ];
 
