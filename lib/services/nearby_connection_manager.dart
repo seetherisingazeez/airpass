@@ -17,6 +17,7 @@
 library;
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -230,6 +231,17 @@ class NearbyConnectionManager {
   bool _isDiscovering = false;
   bool get isDiscovering => _isDiscovering;
 
+  /// Returns true if the node is currently connected to any peers,
+  /// or is actively handshaking with one.
+  /// When the radio is busy, background discovery should be paused to
+  /// prevent STATUS_RADIO_ERROR and maximize bandwidth for transfers.
+  bool get isRadioBusy => _activeEndpoints.isNotEmpty || _connectionQueue.isNotEmpty;
+
+  /// Queue of endpoint IDs waiting for a connection request.
+  final Queue<String> _connectionQueue = Queue<String>();
+  bool _isProcessingConnectionQueue = false;
+  Completer<void>? _currentConnectionCompleter;
+
   NearbyConnectionManager({
     required this._syncEngine,
     required this._codec,
@@ -256,6 +268,9 @@ class NearbyConnectionManager {
     }
     _disconnectTimers.clear();
     _outgoingMediaPayloads.clear();
+    _connectionQueue.clear();
+    _isProcessingConnectionQueue = false;
+    _currentConnectionCompleter = null;
     _eventController.close();
   }
 
@@ -430,25 +445,80 @@ class NearbyConnectionManager {
       return;
     }
 
-    _log('Requesting connection to $endpointId ($metadata)');
-    _activeEndpoints.add(endpointId);
-    _emit(ConnectionRequested(endpointId));
+    if (_connectionQueue.contains(endpointId)) {
+      _log('Already in connection queue for $endpointId, skipping');
+      return;
+    }
 
-    _nearby.requestConnection(
-      _codec.encode(
-        nodeId: localNodeId,
-        role: localRole,
-        groupIds: localGroupIds,
-      ),
-      endpointId,
-      onConnectionInitiated: _onConnectionInitiated,
-      onConnectionResult: _onConnectionResult,
-      onDisconnected: _onDisconnected,
-    ).catchError((e) {
-      _log('Failed to request connection to $endpointId: $e');
-      _activeEndpoints.remove(endpointId);
-      return false;
-    });
+    _log('Queueing connection request for $endpointId ($metadata)');
+    _connectionQueue.add(endpointId);
+    _emit(ConnectionRequested(endpointId));
+    _processConnectionQueue();
+  }
+
+  /// Processes the connection queue sequentially to prevent STATUS_RADIO_ERROR.
+  /// Stops discovery before requesting a connection, and waits for the handshake
+  /// to complete before initiating the next connection.
+  Future<void> _processConnectionQueue() async {
+    if (_isProcessingConnectionQueue) return;
+    _isProcessingConnectionQueue = true;
+
+    while (_connectionQueue.isNotEmpty) {
+      final endpointId = _connectionQueue.removeFirst();
+      if (_activeEndpoints.contains(endpointId)) continue;
+
+      _log('Processing connection to $endpointId from queue');
+      _activeEndpoints.add(endpointId);
+      _currentConnectionCompleter = Completer<void>();
+
+      // CRITICAL: Stop discovery before attempting connection
+      // This gives the radio maximum bandwidth for the handshake and prevents
+      // STATUS_RADIO_ERROR (8007).
+      try {
+        await stopDiscovery();
+      } catch (e) {
+        _log('Error stopping discovery before connection: $e');
+      }
+
+      try {
+        await _nearby.requestConnection(
+          _codec.encode(
+            nodeId: localNodeId,
+            role: localRole,
+            groupIds: localGroupIds,
+          ),
+          endpointId,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: _onConnectionResult,
+          onDisconnected: _onDisconnected,
+        );
+
+        // Wait up to 10 seconds for the handshake to finish
+        // The completer is resolved in _onConnectionResult or _onDisconnected
+        await _currentConnectionCompleter!.future.timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            _log('Connection request to $endpointId timed out, forcing disconnect');
+            _nearby.disconnectFromEndpoint(endpointId);
+            _activeEndpoints.remove(endpointId);
+          },
+        );
+      } catch (e) {
+        _log('Failed to request connection to $endpointId: $e');
+        if (e.toString().contains('8003') || e.toString().contains('STATUS_ALREADY_CONNECTED_TO_ENDPOINT')) {
+          _log('Already connected to $endpointId, keeping in active list.');
+        } else {
+          _activeEndpoints.remove(endpointId);
+        }
+      } finally {
+        _currentConnectionCompleter = null;
+      }
+
+      // Small delay between connections to let the radio settle
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    _isProcessingConnectionQueue = false;
   }
 
   /// Called when a previously discovered endpoint is lost.
@@ -456,6 +526,11 @@ class NearbyConnectionManager {
     if (endpointId == null) return;
     _emit(EndpointLost(endpointId));
     _activeEndpoints.remove(endpointId);
+    // Remove from queue if it was pending
+    final wasRemoved = _connectionQueue.remove(endpointId);
+    if (wasRemoved) {
+      _log('Removed lost endpoint $endpointId from connection queue');
+    }
     _log('Endpoint lost: $endpointId');
   }
 
@@ -527,6 +602,10 @@ class NearbyConnectionManager {
   /// Phase 1 of the two-phase sync: send our Bloom filter immediately.
   /// The peer does the same. When we receive their filter, Phase 2 begins.
   void _onConnectionResult(String endpointId, Status status) {
+    if (_currentConnectionCompleter != null && !_currentConnectionCompleter!.isCompleted) {
+      _currentConnectionCompleter!.complete();
+    }
+
     if (status == Status.CONNECTED) {
       _emit(ConnectionEstablished(endpointId));
       _log('Connected to $endpointId — sending Bloom filter (Phase 1)');
@@ -542,6 +621,9 @@ class NearbyConnectionManager {
 
   /// Called when a peer disconnects (either side).
   void _onDisconnected(String endpointId) {
+    if (_currentConnectionCompleter != null && !_currentConnectionCompleter!.isCompleted) {
+      _currentConnectionCompleter!.complete();
+    }
     _emit(Disconnected(endpointId));
     _activeEndpoints.remove(endpointId);
     _endpointToNodeId.remove(endpointId);

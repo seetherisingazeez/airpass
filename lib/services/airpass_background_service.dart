@@ -194,11 +194,17 @@ Future<void> _startMainIsolateScanLoop() async {
     // ─── SCAN WINDOW: Activate discovery ───
     _log('Scan window open (${kScanWindowDurationMs}ms)');
 
-    // Always restart discovery to ensure the OS hasn't
-    // silently killed it. Also prevents STATUS_ALREADY_DISCOVERING (8002)
-    // by explicitly stopping before restarting.
-    await manager.stopDiscovery();
-    await manager.startDiscovery();
+    // Only start discovery if the radio is NOT currently busy handling connections.
+    // Starting discovery during a handshake causes STATUS_RADIO_ERROR.
+    if (!manager.isRadioBusy) {
+      // Always restart discovery to ensure the OS hasn't
+      // silently killed it. Also prevents STATUS_ALREADY_DISCOVERING (8002)
+      // by explicitly stopping before restarting.
+      await manager.stopDiscovery();
+      await manager.startDiscovery();
+    } else {
+      _log('Radio is busy (active connections/transfers), skipping discovery to protect bandwidth');
+    }
 
     // Listen for successful syncs to reset backoff
     late StreamSubscription<AirpassEvent> sub;
