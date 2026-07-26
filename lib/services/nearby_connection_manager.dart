@@ -198,6 +198,10 @@ class NearbyConnectionManager {
   /// look up which message it belongs to.
   final Map<int, String> _mediaPayloadToMessageId = {};
 
+  /// Tracks which endpoint is sending which incoming media payload.
+  /// payload ID -> endpoint ID
+  final Map<int, String> _mediaPayloadToEndpointId = {};
+
   /// Maps Nearby payload IDs to their temporary URIs for incoming media.
   final Map<int, String> _mediaPayloadToUri = {};
 
@@ -245,6 +249,7 @@ class NearbyConnectionManager {
     _bloomPayloadIds.clear();
     _syncPayloadIds.clear();
     _mediaPayloadToMessageId.clear();
+    _mediaPayloadToEndpointId.clear();
     _mediaTransferCounts.clear();
     for (final t in _disconnectTimers.values) {
       t.cancel();
@@ -594,6 +599,7 @@ class NearbyConnectionManager {
         final msgId = header['msgId'] as String;
         final filePayloadId = header['payloadId'] as int;
         _mediaPayloadToMessageId[filePayloadId] = msgId;
+        _mediaPayloadToEndpointId[filePayloadId] = endpointId;
         _log(
           'Media response header from $endpointId: '
           'msgId=$msgId, payloadId=$filePayloadId',
@@ -662,6 +668,7 @@ class NearbyConnectionManager {
       } else if (_mediaPayloadToMessageId.containsKey(update.id)) {
         // ── Media FILE transfer complete ──
         final msgId = _mediaPayloadToMessageId.remove(update.id)!;
+        _mediaPayloadToEndpointId.remove(update.id);
         final tempUri = _mediaPayloadToUri.remove(update.id);
         _onMediaFileReceived(endpointId, msgId, update, tempUri);
       } else if (_outgoingMediaPayloads.containsKey(update.id)) {
@@ -684,6 +691,7 @@ class NearbyConnectionManager {
     } else if (update.status == PayloadStatus.FAILURE) {
       if (_mediaPayloadToMessageId.containsKey(update.id)) {
         final msgId = _mediaPayloadToMessageId.remove(update.id)!;
+        _mediaPayloadToEndpointId.remove(update.id);
         _emit(MediaTransferFailed(msgId, 'Transfer failed'));
         _db.updateMediaAvailability(msgId, MediaAvailability.failed);
       } else if (_outgoingMediaPayloads.containsKey(update.id)) {
@@ -782,6 +790,7 @@ class NearbyConnectionManager {
       final result = await _syncEngine.processSyncPayload(data);
       final newMessages = result.newMessages;
       final peerNodeId = result.peerNodeId;
+      final availableMediaIds = result.availableMediaIds;
 
       _emit(SyncCompleted(endpointId, newMessages));
       _log('Sync complete with $endpointId: $newMessages new messages');
@@ -798,9 +807,14 @@ class NearbyConnectionManager {
         kAutoDownloadMaxBytes,
       );
 
-      if (pendingMedia.isNotEmpty) {
+      // Only request files that the peer explicitly told us they have downloaded
+      final availablePendingMedia = pendingMedia
+          .where((m) => availableMediaIds.contains(m.messageId))
+          .toList();
+
+      if (availablePendingMedia.isNotEmpty) {
         // Request up to kMaxMediaSyncsPerConnection files
-        final toRequest = pendingMedia
+        final toRequest = availablePendingMedia
             .take(kMaxMediaSyncsPerConnection)
             .map((m) => m.messageId)
             .toList();
@@ -977,7 +991,16 @@ class NearbyConnectionManager {
       _executeDisconnect(endpointId);
     } else {
       _disconnectTimers[endpointId]?.cancel();
-      _disconnectTimers[endpointId] = Timer(const Duration(seconds: 2), () {
+      _disconnectTimers[endpointId] = Timer(const Duration(seconds: 5), () {
+        // Double check for active media transfers before executing disconnect
+        if (_outgoingMediaPayloads.values.contains(endpointId)) {
+          _log('Skipping disconnect for $endpointId — still sending media');
+          return;
+        }
+        if (_mediaPayloadToEndpointId.values.contains(endpointId)) {
+          _log('Skipping disconnect for $endpointId — still receiving media');
+          return;
+        }
         _executeDisconnect(endpointId);
       });
     }
@@ -996,6 +1019,7 @@ class NearbyConnectionManager {
     _bloomPayloadIds.remove(endpointId);
     _syncPayloadIds.remove(endpointId);
     _mediaTransferCounts.remove(endpointId);
+    _mediaPayloadToEndpointId.removeWhere((_, value) => value == endpointId);
     _log('Disconnected from $endpointId (post-sync)');
   }
 

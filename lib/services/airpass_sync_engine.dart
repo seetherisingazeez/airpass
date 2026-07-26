@@ -180,6 +180,10 @@ class SyncMessageEntry {
   /// media types that don't support thumbnails.
   final String? thumbnailBase64;
 
+  /// Whether the sender actually has the binary file downloaded locally.
+  /// If true, peers can request the file from the sender via the Phase 3 FILE API.
+  final bool hasMediaBinary;
+
   const SyncMessageEntry({
     required this.messageId,
     required this.senderId,
@@ -195,6 +199,7 @@ class SyncMessageEntry {
     this.mediaFileSize,
     this.mediaHash,
     this.thumbnailBase64,
+    this.hasMediaBinary = false,
   });
 
   /// Whether this message carries a media attachment.
@@ -216,6 +221,7 @@ class SyncMessageEntry {
     if (mediaFileSize != null) 'mfs': mediaFileSize,
     if (mediaHash != null) 'mh': mediaHash,
     if (thumbnailBase64 != null) 'thumb': thumbnailBase64,
+    if (hasMediaBinary) 'hmb': true,
   };
 
   factory SyncMessageEntry.fromJson(Map<String, dynamic> json) {
@@ -234,6 +240,7 @@ class SyncMessageEntry {
       mediaFileSize: json['mfs'] as int?,
       mediaHash: json['mh'] as String?,
       thumbnailBase64: json['thumb'] as String?,
+      hasMediaBinary: json['hmb'] as bool? ?? false,
     );
   }
 }
@@ -575,6 +582,7 @@ class AirpassSyncEngine {
               thumbnailBase64: m.mediaThumbnail != null
                   ? base64Encode(m.mediaThumbnail!)
                   : null,
+              hasMediaBinary: m.mediaAvailability == 3, // MediaAvailability.available.value
             );
           })
           .where((m) => m.ttl > 0)
@@ -611,8 +619,9 @@ class AirpassSyncEngine {
   /// Heavy JSON parsing is offloaded to a background isolate if the
   /// decompressed payload exceeds [kIsolateParsingThresholdBytes].
   ///
-  /// Returns a record with the number of new messages ingested and the peer's full node ID.
-  Future<({int newMessages, String peerNodeId})> processSyncPayload(
+  /// Returns a record with the number of new messages ingested, the peer's full node ID,
+  /// and a list of message IDs for which the peer has the media binary available.
+  Future<({int newMessages, String peerNodeId, List<String> availableMediaIds})> processSyncPayload(
     Uint8List compressedBytes,
   ) async {
     // 1. Decompress
@@ -648,7 +657,16 @@ class AirpassSyncEngine {
     await _db.pruneStaleNodes(kStaleNodeThreshold);
     await _db.pruneOrphanedDeliveries();
 
-    return (newMessages: newMessageCount, peerNodeId: syncPayload.senderNodeId);
+    final availableMediaIds = syncPayload.messages
+        .where((m) => m.hasMediaBinary)
+        .map((m) => m.messageId)
+        .toList();
+
+    return (
+      newMessages: newMessageCount,
+      peerNodeId: syncPayload.senderNodeId,
+      availableMediaIds: availableMediaIds,
+    );
   }
 
   /// Merges incoming node entries into the local routing table.
