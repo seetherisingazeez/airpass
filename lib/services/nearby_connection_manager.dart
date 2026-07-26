@@ -19,6 +19,7 @@ library;
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -213,6 +214,9 @@ class NearbyConnectionManager {
   /// Timers for pending disconnections to allow media requests to arrive.
   final Map<String, Timer> _disconnectTimers = {};
 
+  /// Timers to clear stalled connection handshakes (Phase 1/2 timeouts).
+  final Map<String, Timer> _connectionStallTimers = {};
+
   /// Outgoing media payloads we are currently sending (payloadId -> endpointId).
   final Map<int, String> _outgoingMediaPayloads = {};
 
@@ -240,6 +244,7 @@ class NearbyConnectionManager {
   /// Queue of endpoint IDs waiting for a connection request.
   final Queue<String> _connectionQueue = Queue<String>();
   bool _isProcessingConnectionQueue = false;
+  String? _currentConnectingEndpointId;
   Completer<void>? _currentConnectionCompleter;
 
   NearbyConnectionManager({
@@ -270,6 +275,7 @@ class NearbyConnectionManager {
     _outgoingMediaPayloads.clear();
     _connectionQueue.clear();
     _isProcessingConnectionQueue = false;
+    _currentConnectingEndpointId = null;
     _currentConnectionCompleter = null;
     _eventController.close();
   }
@@ -450,10 +456,24 @@ class NearbyConnectionManager {
       return;
     }
 
-    _log('Queueing connection request for $endpointId ($metadata)');
-    _connectionQueue.add(endpointId);
-    _emit(ConnectionRequested(endpointId));
-    _processConnectionQueue();
+    // Add a random delay to prevent connection request collisions.
+    // In P2P_CLUSTER, both nodes might discover each other simultaneously.
+    // If they both call requestConnection instantly, the handshakes collide.
+    // A random delay ensures one node initiates first, and the other receives
+    // onConnectionInitiated and aborts its own request gracefully.
+    final delayMs = Random().nextInt(1500) + 100; // 100ms to 1600ms
+    _log('Waiting ${delayMs}ms before queueing connection to $endpointId (collision avoidance)');
+    
+    Future.delayed(Duration(milliseconds: delayMs), () {
+      if (_activeEndpoints.contains(endpointId) || _connectionQueue.contains(endpointId)) {
+        _log('Peer $endpointId already connected/queued after delay, skipping');
+        return;
+      }
+      _log('Queueing connection request for $endpointId ($metadata)');
+      _connectionQueue.add(endpointId);
+      _emit(ConnectionRequested(endpointId));
+      _processConnectionQueue();
+    });
   }
 
   /// Processes the connection queue sequentially to prevent STATUS_RADIO_ERROR.
@@ -469,6 +489,7 @@ class NearbyConnectionManager {
 
       _log('Processing connection to $endpointId from queue');
       _activeEndpoints.add(endpointId);
+      _currentConnectingEndpointId = endpointId;
       _currentConnectionCompleter = Completer<void>();
 
       // CRITICAL: Stop discovery before attempting connection
@@ -476,8 +497,10 @@ class NearbyConnectionManager {
       // STATUS_RADIO_ERROR (8007).
       try {
         await stopDiscovery();
+        // Clear any OS-level ghost connections to this endpoint before requesting
+        await _nearby.disconnectFromEndpoint(endpointId);
       } catch (e) {
-        _log('Error stopping discovery before connection: $e');
+        _log('Error cleaning up radio state before connection: $e');
       }
 
       try {
@@ -511,6 +534,7 @@ class NearbyConnectionManager {
           _activeEndpoints.remove(endpointId);
         }
       } finally {
+        _currentConnectingEndpointId = null;
         _currentConnectionCompleter = null;
       }
 
@@ -577,7 +601,8 @@ class NearbyConnectionManager {
     _activeEndpoints.add(endpointId);
 
     // Add a safety timeout to clear zombie connections if sync stalls
-    Future.delayed(const Duration(seconds: 30), () {
+    _connectionStallTimers[endpointId]?.cancel();
+    _connectionStallTimers[endpointId] = Timer(const Duration(seconds: 30), () {
       if (_activeEndpoints.contains(endpointId)) {
         _log('Connection to $endpointId stalled. Forcing cleanup.');
         _nearby.disconnectFromEndpoint(endpointId);
@@ -602,9 +627,13 @@ class NearbyConnectionManager {
   /// Phase 1 of the two-phase sync: send our Bloom filter immediately.
   /// The peer does the same. When we receive their filter, Phase 2 begins.
   void _onConnectionResult(String endpointId, Status status) {
-    if (_currentConnectionCompleter != null && !_currentConnectionCompleter!.isCompleted) {
+    if (_currentConnectingEndpointId == endpointId &&
+        _currentConnectionCompleter != null &&
+        !_currentConnectionCompleter!.isCompleted) {
       _currentConnectionCompleter!.complete();
     }
+    _connectionStallTimers[endpointId]?.cancel();
+    _connectionStallTimers.remove(endpointId);
 
     if (status == Status.CONNECTED) {
       _emit(ConnectionEstablished(endpointId));
@@ -621,9 +650,13 @@ class NearbyConnectionManager {
 
   /// Called when a peer disconnects (either side).
   void _onDisconnected(String endpointId) {
-    if (_currentConnectionCompleter != null && !_currentConnectionCompleter!.isCompleted) {
+    if (_currentConnectingEndpointId == endpointId &&
+        _currentConnectionCompleter != null &&
+        !_currentConnectionCompleter!.isCompleted) {
       _currentConnectionCompleter!.complete();
     }
+    _connectionStallTimers[endpointId]?.cancel();
+    _connectionStallTimers.remove(endpointId);
     _emit(Disconnected(endpointId));
     _activeEndpoints.remove(endpointId);
     _endpointToNodeId.remove(endpointId);
