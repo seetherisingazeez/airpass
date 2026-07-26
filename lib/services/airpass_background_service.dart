@@ -186,16 +186,17 @@ Future<void> _startMainIsolateScanLoop() async {
   _log('Starting main isolate scan loop...');
   final manager = getIt<NearbyConnectionManager>();
 
+  // Start advertising once, continuously
+  await manager.stopAdvertising();
+  await manager.startAdvertising();
+
   while (_isScanLoopRunning) {
-    // ─── SCAN WINDOW: Activate advertising + discovery ───
+    // ─── SCAN WINDOW: Activate discovery ───
     _log('Scan window open (${kScanWindowDurationMs}ms)');
 
-    // Always restart advertising + discovery to ensure the OS hasn't
-    // silently killed them. Also prevents STATUS_ALREADY_DISCOVERING (8002)
+    // Always restart discovery to ensure the OS hasn't
+    // silently killed it. Also prevents STATUS_ALREADY_DISCOVERING (8002)
     // by explicitly stopping before restarting.
-    await manager.stopAdvertising();
-    await manager.startAdvertising();
-
     await manager.stopDiscovery();
     await manager.startDiscovery();
 
@@ -257,6 +258,10 @@ Future<void> _startMainIsolateScanLoop() async {
           .clamp(kInitialScanIntervalMs, kMaxScanIntervalMs);
     }
   }
+
+  // Ensure everything is stopped when exiting the scan loop
+  await manager.stopAdvertising();
+  await manager.stopDiscovery();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
