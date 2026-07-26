@@ -439,7 +439,11 @@ class NearbyConnectionManager {
       onConnectionInitiated: _onConnectionInitiated,
       onConnectionResult: _onConnectionResult,
       onDisconnected: _onDisconnected,
-    );
+    ).catchError((e) {
+      _log('Failed to request connection to $endpointId: $e');
+      _activeEndpoints.remove(endpointId);
+      return false;
+    });
   }
 
   /// Called when a previously discovered endpoint is lost.
@@ -473,7 +477,10 @@ class NearbyConnectionManager {
         'Rejecting $endpointId: incompatible protocol version '
         'v${peerMetadata.protocolVersion} (we are v$kAirpassProtocolVersion)',
       );
-      _nearby.rejectConnection(endpointId);
+      _nearby.rejectConnection(endpointId).catchError((e) {
+        _log('Failed to reject connection for $endpointId: $e');
+        return false;
+      });
       return;
     }
 
@@ -503,7 +510,11 @@ class NearbyConnectionManager {
       endpointId,
       onPayLoadRecieved: _onPayloadReceived,
       onPayloadTransferUpdate: _onPayloadTransferUpdate,
-    );
+    ).catchError((e) {
+      _log('Failed to accept connection from $endpointId: $e');
+      _activeEndpoints.remove(endpointId);
+      return false;
+    });
   }
 
   /// Called when the connection handshake completes.
