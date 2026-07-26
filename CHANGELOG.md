@@ -1,3 +1,5 @@
 ## 0.0.1
 
-* TODO: Describe initial release.
+* Initial release.
+* Features decentralized, offline, store-and-forward mesh networking.
+* Built-in support for epidermic routing via SQLite (Drift).

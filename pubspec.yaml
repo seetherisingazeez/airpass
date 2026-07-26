@@ -1,7 +1,7 @@
 name: airpass
-description: "A new Flutter plugin project."
+description: A decentralized, offline, store-and-forward mesh networking protocol for Flutter. Uses Google Nearby Connections for ephemeral communication.
 version: 0.0.1
-homepage:
+homepage: https://github.com/your-username/airpass # TODO: Update with your repository URL
 
 environment:
   sdk: ^3.12.0
